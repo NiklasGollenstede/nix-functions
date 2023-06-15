@@ -4,7 +4,7 @@ dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
-    ## Builds an attrset that, for each file with extension »ext« in »dir«, maps the the base name of that file, to its full path.
+    # Builds an attrset that, for each file with extension »ext« in »dir«, maps the the base name of that file, to its full path.
     getFilesExt = ext: dir: builtins.removeAttrs (builtins.listToAttrs (map (name: let
         match = builtins.match ''^(.*)[.]${builtins.replaceStrings [ "." ] [ "[.]" ] ext}$'' name;
     in if (match != null) then {
@@ -50,7 +50,7 @@ in rec {
     importAll = inputs: dir: builtins.mapAttrs (name: path: import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs) (builtins.removeAttrs (getNixFiles dir) [ "default" ]);
 
     # Import a Nix file that expects the standard `dirname: inputs: ` arguments, providing some additional information and error handling.
-    importWrapped = inputs: path: rec {
+    importWrapped = inputs: path': let path = "${path'}"; in rec {
         # Whether the file is imported by an explicit full path (or one omitting ».nix« or »/default.nix«):
         isExplicit = (builtins.match ''^(.*)[.]nix([.]md)?$'' path) != null;
         # Whether the import path _implicitly_ refers to the »/default.nix« in a directory:
@@ -99,15 +99,15 @@ in rec {
     # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as attribute set. See »importFilteredFlattened« and »couldBeOverlay« for details.
     importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = couldBeOverlay; });
 
-    # Imports »inputs.nixpkgs« and instantiates it with all ».overlay(s)« provided by »inputs.*«.
+    # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({
-        overlays = builtins.concatLists (map (input: if input?overlay then [ input.overlay ] else if input?overlays then builtins.attrValues input.overlays else [ ]) (builtins.attrValues inputs));
+        overlays = getOverlaysFromInputs inputs;
     } // args);
 
-    ## Given an attrset of nix flake »inputs«, returns the list of all default overlays defined by those other flakes (non-recursive).
+    # Given an attrset of nix flake »inputs«, returns the list of all default overlays defined by those other flakes (non-recursive).
     getOverlaysFromInputs = inputs: (lib.remove null (map (input: if input?overlays.default then input.overlays.default else if input?overlay then input.overlay else null) (builtins.attrValues inputs)));
 
-    ## Given an attrset of nix flake »inputs«, returns the list of all default NixOS modules defined by those other flakes (non-recursive).
+    # Given an attrset of nix flake »inputs«, returns the list of all default NixOS modules defined by those other flakes (non-recursive).
     getModulesFromInputs = inputs: (lib.remove null (map (input: if input?nixosModules.default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues inputs)));
 
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
@@ -144,7 +144,7 @@ in rec {
         fullPath = "${modulesPath}/${modulePath}";
         module = import fullPath (args // extraOriginalModuleArgs);
         overrides = lib.toList (override module);
-        _file = if (lib.head overrides)?config then let pos = builtins.unsafeGetAttrPos "config" (lib.head overrides); in "${pos.file}:${toString pos.line}(override)" else "${fullPath}#override";
+        _file = if (builtins.head overrides)?config then let pos = builtins.unsafeGetAttrPos "config" (builtins.head overrides); in "${pos.file}:${toString pos.line}(override)" else "${fullPath}#override";
     in { inherit _file; imports = [
         (mergeAttrsRecursive ([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ] ++ overrides))
         { disabledModules = [ modulePath ]; }

@@ -15,6 +15,7 @@ in rec {
     ## Misc
 
     # Creates a package for `config.systemd.packages` that adds an `override.conf` to the specified `unit` (which is the only way to modify a single service template instance).
+    # (Actually, »systemd.services.<name>.overrideStrategy« may be an alternative now.)
     mkSystemdOverride = pkgs: unit: text: (pkgs.runCommandNoCC unit { preferLocalBuild = true; allowSubstitutes = false; } ''
         mkdir -p $out/${lib.escapeShellArg "/etc/systemd/system/${unit}.d/"}
         <<<${lib.escapeShellArg text} cat >$out/${lib.escapeShellArg "/etc/systemd/system/${unit}.d/override.conf"}

@@ -119,10 +119,18 @@ in rec {
     in ''${type} ${if pathSubstitute then esc path else noSub (esc path)} ${esc mode} ${esc user} ${esc group} ${esc age} ${if pathSubstitute then argument'' else noSub argument''}'';
 /*
     systemd.tmpfiles.rules = [
-        (lib.wip.mkTmpfile { type = "f+"; path = "/home/user/t\"e\t%t\n!"; user = "user"; argument = " . foo\nbar\r\n\tba%!\n"; })
+        (mkTmpfile { type = "f+"; path = "/home/user/t\"e\t%t\n!"; user = "user"; argument = " . foo\nbar\r\n\tba%!\n"; })
         ''f+ "/home/user/test!\"!\t!%%!\x20! !\n!${"\n"}%!%a!\\!" - "user" "user" - \x20. foo%a!\nbar\r\n\tba%%!\n''
     ];
  */
+
+    # Given a »path«, returns the list of all its parents, starting with »path« itself and ending with only its first segment.
+    # Examples: "/a/b/c" -> [ "/a/b/c" "/a/b" "/a" ] ; "x/y" -> [ "x/y" "x" ]
+    parentPaths = path: let
+        absolute = if lib.hasPrefix "/" path then 1 else 0; prefix = if absolute == 1 then "/" else "";
+        split = builtins.filter builtins.isString (builtins.split ''/'' (builtins.substring (absolute) ((builtins.stringLength path) - absolute - (if lib.hasSuffix "/" path then 1 else 0)) path));
+    in map (length: prefix + (builtins.concatStringsSep "/" (lib.take length split))) (lib.reverseList ((lib.range 1 (builtins.length split))));
+
 
     ## Math
 
