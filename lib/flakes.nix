@@ -31,10 +31,13 @@ in rec {
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
-    # outputs = inputs@{ self, nixpkgs, functions, ... }: functions.lib.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
+    #     outputs = inputs@{ self, nixpkgs, functions, ... }: functions.lib.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
+    # If the `flake.nix` is in a sub dir (e.g., `nix`) of a repo and some of the (implicitly) imported files need to reference something outside that sub dir, then the path needs to passed like this: `"${../.}/nix"` (i.e, a native nix path out to the root of the repo (/what needs to be referenced) and then a string path back do the flake dir).
     importRepo = inputs: flakePath': outputs: let
-        flakePath = builtins.path { path = flakePath'; name = "source"; }; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (because it copies it). For flakes with »dir != ""«, this includes only the ».« directory, making references to »./..« invalid, but ensuring that »./flake.nix« exists (there), and the below default paths are relative to that (and not whatever nix thought is the root of the repo).
-        # TODO: should _not_ do the above if it is not a direct store path
+        pathSuffix = lib.removePrefix "${builtins.storeDir}/" flakePath';
+        componentName = builtins.head (builtins.split "/" pathSuffix);
+        flakeDir = lib.removePrefix componentName pathSuffix;
+        flakePath = "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}"; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (when cast to a string, because it copies it).
     in let result = (outputs (
         (let it                = importWrapped inputs "${flakePath}/lib";      in if it.exists then {
             lib = it.result;
