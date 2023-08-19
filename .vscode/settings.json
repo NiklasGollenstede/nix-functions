@@ -1,4 +1,9 @@
 {
+	"[nix]": {
+		"editor.detectIndentation": true,
+		"editor.insertSpaces": true,
+		"editor.tabSize": 4,
+	},
 	"markdown.validate.ignoredLinks": [
 	],
 	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
@@ -6,14 +11,31 @@
 		"aarch64",
 		"attrset",
 		"attrsets",
+		"attrVals",
+		"bindfs",
 		"builtins",
 		"concat",
+		"coreutils",
+		"dontNpmBuild",
+		"dotglob",
 		"fetchpatch",
 		"foldl",
+		"gidmapping",
 		"Gollenstede",
+		"loglevel",
+		"lowerdir",
+		"middledir",
+		"mountpoint",
 		"Niklas",
 		"nixos",
 		"nixpkgs",
-		"pkgs"
+		"overlayfs",
+		"passthru",
+		"pipefail",
+		"pkgs",
+		"shopt",
+		"uidmapping",
+		"upperdir",
+		"workdir",
 	],
 }
