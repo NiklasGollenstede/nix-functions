@@ -44,14 +44,25 @@ in rec {
         flakeDir = lib.removePrefix componentName pathSuffix;
         flakePath = "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}"; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (when cast to a string, because it copies it).
     in let result = (outputs (
-        (let it                = importWrapped inputs "${flakePath}/lib";      in if it.exists then {
+        (let
+            it = importWrapped inputs "${flakePath}/lib";
+        in if it.exists then {
             lib = it.result;
-        } else { }) // (let it = importWrapped inputs "${flakePath}/overlays"; in if it.exists then {
-            overlays = { default = final: prev: builtins.foldl' (prev: overlay: prev // (overlay final prev)) prev (builtins.attrValues it.result); } // it.result;
-        } else { }) // (let it = importWrapped inputs "${flakePath}/modules";  in if it.exists then {
-            nixosModules = { default = { imports = builtins.attrValues it.result; }; } // it.result;
+        } else { }) // (let
+            it = importWrapped inputs "${flakePath}/overlays";
+        in if it.exists then {
+            overlays = { default = mergeOverlays (lib.attrValues it.result); } // it.result;
+        } else { }) // (let
+            it = importWrapped inputs "${flakePath}/modules";
+        in if it.exists then {
+            nixosModules = { default = { imports = builtins.attrValues it.result; _file = "${flakePath}/modules#merged"; }; } // it.result;
         } else { })
     )); in if (builtins.isList result) then mergeFlakeOutputs result else result;
+
+    ## Composes a single (nixpkgs) overlay that applies a list of overlays, low indices first.
+    mergeOverlays = overlays: (
+        final: prev: builtins.foldl' (acc: overlay: acc // (overlay final (prev // acc))) { } overlays
+    );
 
     # Combines »patchFlakeInputs« and »importRepo« in a single call. E.g.:
     # outputs = inputs: let patches = {
