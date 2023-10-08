@@ -117,11 +117,11 @@ in rec {
         names = if overlays?default then getNames overlays.default else builtins.concatLists (map getNames (builtins.attrValues overlays));
     in mapMergeUnique (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
-    # Automatically builds a flakes »outputs.packages« based on its »(inputs.self == outputs).overlays.default« (and »inputs.nixpkgs«).
-    packagesFromOverlay = args@{ inputs, systems ? import inputs.systems, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" ]) // { system = localSystem; });
+    # Automatically builds a flakes »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
+    packagesFromOverlay = args@{ inputs, systems ? import inputs.systems, default ? null, exclude ? [ ], ... }: lib.genAttrs systems (localSystem: let
+        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "exclude" ]) // { system = localSystem; });
         packages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
-    in packages // (if args?default then { default = args.default packages; } else { }));
+    in (builtins.removeAttrs packages exclude) // (if default != null then { default = default pkgs; } else { }));
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.

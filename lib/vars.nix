@@ -53,6 +53,11 @@ in rec {
     # Like »builtins.catAttrs«, just for attribute sets instead of lists: Given an attribute set of attribute sets (»{ ${l1name}.${l2name} = value; }«) and the »name« of a second-level attribute, this returns the attribute set mapping directly from the first level's names to the second-level's values (»{ ${l1name} = value; }«), omitting any first-level attributes that lack the requested second-level attribute.
     catAttrSets = name: attrs: (builtins.mapAttrs (_: value: value.${name}) (lib.filterAttrs (_: value: value?${name}) attrs));
 
+    # Returns the first index at with an element is stored in a list, or -1.
+    indexOf = list: elem: let
+        len = builtins.length list;
+        go = i: if i == len then -1 else if (builtins.elemAt list i) == elem then i else go (i + 1);
+    in go 0;
 
     ## String Manipulation
 

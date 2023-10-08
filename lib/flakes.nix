@@ -20,7 +20,7 @@ in rec {
         }).overrideAttrs (old: {
             outputs = [ "out" "narHash" ];
             installPhase = old.installPhase + "\n" + ''
-                ${lib.getExe nix} --extra-experimental-features nix-command hash path ./ >$narHash
+                ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ./ >$narHash
             '';
         });
         sourceInfo = (builtins.removeAttrs (input.sourceInfo or input) [ "narHash" ]) // { inherit (patched) outPath; narHash = lib.fileContents patched.narHash; }; # (keeps (short)rev, which is not really correct, but nixpkgs' rev is used in NixOS generation names)
