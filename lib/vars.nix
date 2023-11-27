@@ -53,7 +53,7 @@ in rec {
     # Like »builtins.catAttrs«, just for attribute sets instead of lists: Given an attribute set of attribute sets (»{ ${l1name}.${l2name} = value; }«) and the »name« of a second-level attribute, this returns the attribute set mapping directly from the first level's names to the second-level's values (»{ ${l1name} = value; }«), omitting any first-level attributes that lack the requested second-level attribute.
     catAttrSets = name: attrs: (builtins.mapAttrs (_: value: value.${name}) (lib.filterAttrs (_: value: value?${name}) attrs));
 
-    # Returns the first index at with an element is stored in a list, or -1.
+    # Returns the first index at which »elem« is stored in »list«, or -1.
     indexOf = list: elem: let
         len = builtins.length list;
         go = i: if i == len then -1 else if (builtins.elemAt list i) == elem then i else go (i + 1);
@@ -66,8 +66,12 @@ in rec {
     # Given a regular expression and a list of strings, returns the list of all the strings matched in their entirety by the regular expression.
     filterMatching = exp: strings: (builtins.filter (matches exp) strings);
     filterMismatching = exp: strings: (builtins.filter (string: !(matches exp string)) strings);
+    # Given a regular expression and a string, determines whether the expression matches the string (in it's entirety).
     matches = exp: string: builtins.match exp string != null;
     extractChars = exp: string: let match = (builtins.match "^.*(${exp}).*$" string); in if match == null then null else builtins.head match;
+
+    # Given a regular expression, a replacement, and a string, replaces all matches of the expression in the string with the replacement, if is is a string, or the result of calling the replacement with the list of captures of this match.
+    regexReplace = exp: replacement: string: builtins.concatStringsSep "" (map (it: if builtins.isString it then it else if builtins.isString replacement then replacement else replacement it) (builtins.split exp string));
 
     # If »exp« (which mustn't match across »\n«) matches (a part of) exactly one line in »text«, return that »line« including tailing »\n«, plus the text part »before« and »after«, the text »without« the line, and any »captures« made by »exp«. If »text« does not end in a »\n«, then one will be added (since this function operates on lines).
     # The »*Anchored« version allows the expression to require to match from the »start« and/or to the »end« of its line, by passing the respective bool(s) as »true«.
@@ -76,13 +80,13 @@ in rec {
         text' = (builtins.unsafeDiscardStringContext (if (lastChar text) == "\n" then text else text + "\n")); # Ensure tailing newline and drop context (since it needs to be added again anyway).
         split = builtins.split exp' text';
         get = builtins.elemAt split; matches = get 1;
-        ctxify = str: lib.addContextFrom text str;
+        withCtx = str: lib.addContextFrom text str;
     in if builtins.length split != 3 then null else rec { # length < 3 => no match ; length < 3 => multiple matches
-        before = ctxify ((get 0) + (builtins.head matches));
-        line = ctxify (builtins.elemAt matches 1);
-        captures = map ctxify (lib.sublist 3 (builtins.length matches) matches);
-        after = ctxify (get 2);
-        without = ctxify (before + after);
+        before = withCtx ((get 0) + (builtins.head matches));
+        line = withCtx (builtins.elemAt matches 1);
+        captures = map withCtx (lib.sublist 3 (builtins.length matches) matches);
+        after = withCtx (get 2);
+        without = withCtx (before + after);
     }; # (The string context stuff is actually required, but why? Shouldn't »builtins.split« propagate the context?)
     extractLine = exp: text: extractLineAnchored exp false false text;
 

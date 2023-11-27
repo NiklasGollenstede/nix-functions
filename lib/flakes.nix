@@ -24,7 +24,7 @@ in rec {
             '';
         });
         sourceInfo = (builtins.removeAttrs (input.sourceInfo or input) [ "narHash" ]) // { inherit (patched) outPath; narHash = lib.fileContents patched.narHash; }; # (keeps (short)rev, which is not really correct, but nixpkgs' rev is used in NixOS generation names)
-        dir = if input?sourceInfo.outPath && lib.hasPrefix input.outPath input.sourceInfo.outPath then lib.removePrefix input.sourceInfo.outPath input.outPath else ""; # this should work starting with nix version 2.14 (before, they are the same path)
+        dir = if input?sourceInfo.outPath && lib.hasPrefix input.sourceInfo.outPath input.outPath then lib.removePrefix input.sourceInfo.outPath input.outPath else ""; # this should work starting with nix version 2.14 (before, they are the same path)
     in (
         # sourceInfo = { lastModified; lastModifiedDate; narHash; outPath; rev?; shortRev?; }
         # A non-flake has only the attrs of »sourceInfo«.

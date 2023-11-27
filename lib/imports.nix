@@ -12,7 +12,7 @@ in rec {
     } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
 
 
-    # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
+    # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file, in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
     getNixFiles = dir: mapMergeUnique (name: type: if (type == "directory") then (
         if (builtins.pathExists "${dir}/${name}/default.nix") then { ${name} = "${dir}/${name}/default.nix"; } else { }
     ) else (
@@ -22,6 +22,10 @@ in rec {
             ${builtins.head match} = "${dir}/${name}";
         } else { }
     )) (builtins.readDir dir);
+    # Builds an attrset that, for each folder that contains a »default.nix« in »dir«, maps the the name of that folder to its full path.
+    getNixDirs = dir: mapMergeUnique (name: type: if (type == "directory") then (
+        if (builtins.pathExists "${dir}/${name}/default.nix") then { ${name} = "${dir}/${name}/default.nix"; } else { }
+    ) else { }) (builtins.readDir dir);
 
     getNixFilesRecursive = dir: let
         list = prefix: dir: mapMergeUnique (name: type: if (type == "directory") then (
@@ -32,6 +36,13 @@ in rec {
             "${prefix}${builtins.head match}" = "${dir}/${name}";
         } else { })) (builtins.readDir dir);
     in list "" dir;
+
+    # Returns an attrset where the values are the paths to all ».patch« files in this directory, and the names the respective »basename -s .patch«s.
+    getPatchFiles = dir: builtins.removeAttrs (builtins.listToAttrs (map (name: let
+        match = builtins.match ''^(.*)[.]patch$'' name;
+    in if (match != null) then {
+        name = builtins.head match; value = builtins.path { path = "${dir}/${name}"; inherit name; }; # »builtins.path« puts the file in a separate, content-addressed store path, ensuring it's path only changes when the content changes, thus avoiding unnecessary rebuilds.
+    } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
 
     ## Decides whether a thing is probably a NixOS configuration module or not.
     #  Probably because almost everything could be a module declaration (any attribute set or function returning one is potentially a module).
@@ -93,11 +104,14 @@ in rec {
         ) else { }) thing
     ) else { })) files;
 
-    # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as attribute set. See »importFilteredFlattened« and »isProbablyModule« for details.
+    # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. See »importFilteredFlattened« and »isProbablyModule« for details.
     importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
 
-    # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as attribute set. See »importFilteredFlattened« and »couldBeOverlay« for details.
+    # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as an attribute set. See »importFilteredFlattened« and »couldBeOverlay« for details.
     importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = couldBeOverlay; });
+
+    # Used in a »default.nix« and called with the »dir« it is in, this returns an attribute set of all patch files in that directory as (see »getPatchFiles«). Any »*/default.nix« found in »dir« will be imported and added to the result as well, so this function can be used in nested »default.nix«es recursively.
+    importPatches = inputs: dir: opts: (lib.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({

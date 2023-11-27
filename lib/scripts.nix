@@ -12,15 +12,15 @@ in rec {
         )) attrs)
     );
 
-    # This function allows using nix values in bash scripts without passing an explicit and manually curated list of values to the script.
-    # Given a path list of bash script »sources« and an attrset »context«, this function parses the scripts for the literal sequence »@{« followed by a lookup path of period-joined words, resolves that attribute path against »context«, declares a variable with that value, and swaps out the »@{« plus path for a »${« use of the declared variable. The returned script sources the variable definitions and all translated »sources« in order.
-    # The lookup path may end in »!« plus the name of a function and optionally string arguments separated by ».«s, in which case the function is taken from »helpers//inputs.self.lib//(pkgs.lib or lib)//pkgs//builtins« and called with the string args and the resolved value as last arg; the return value then replaces the resolved value. Examples: »!attrNames«, »!toJSON«, »!catAttrs«, »!hashString.sha256«.
-    # The names of the declared values are the lookup paths, with ».« and »!« replaced by »_« and »__«.
+    # This function allows using nix values in bash scripts, without the need to pass an explicit and manually curated list of values to the script.
+    # Given a path list of bash script »sources« and an attrset »context«, this function parses the scripts for the literal sequence »@{« followed by a lookup path of period-joined words, and for each map resolves the attribute path against »context«, declares a variable with that value, and swaps out the »@{« plus path for a »${« use of the declared variable. The returned script sources the variable definitions and all translated »sources« in order.
+    # The lookup path may end in »!« plus the name of a function and optionally string arguments separated by ».«s, in which case the function is taken from »helpers//inputs.self.lib//(pkgs.lib or lib)//pkgs//builtins« and called with the string args and the resolved value as last arg; the return value then replaces the resolved value. Examples: »!attrNames«, »!toJSON«, »!catAttrs«, »!hashString.sha256«, »!writeText.filename«.
+    # The names of the declared values are the lookup paths, with ».«/»!«/»-« replaced by »_«/»1«/»0«.
     # The symbol immediately following the lookup path (/builtin name) can be »}« or any other symbol that bash variable substitutions allow after the variable name (like »:«, »/«), eliminating the need to assign to a local variable to do things like replacements, fallbacks or substrings.
     # If the lookup path does not exist in »context«, then the value will be considered the same as »null«, and a value of »null« will result in a bash variable that is not defined (which can then be handled in the bash script).
     # Other scalars (bool, float, int, path) will be passed to »builtins.toString«. Anything that has an ».outPath« that is a string will be passed as that ».outPath«.
     # Lists will be declared as bash arrays, attribute sets will be declared as associative arrays using »asBashDict«.
-    # Bash does not support any nested data structures. Lists or attrsets in within lists or attrsets are therefore (recursively) encoded and escaped as strings, such that calling »eval« on them is safe if (but only if) they are known to be encoded from nested lists/attrsets. Example: »eval 'declare -A fs='"@{config.fileSystems['/']}" ; root=${fs[device]}«.
+    # Bash does not support any nested data structures. Lists or attrsets within lists or attrsets are therefore (recursively) encoded and escaped as strings, such that calling »eval« on them is safe if (but only if) they are known to be encoded from nested lists/attrsets. Example: »eval 'declare -A fs='"@{config.fileSystems['/']}" ; root=${fs[device]}«.
     # Any other value (functions), and things that »builtins.toString« doesn't like, will throw here.
     substituteImplicit = args@{
         scripts, # List of paths to scripts to process and then source in the returned script. Each script may also be an attrset »{ name; text; }« instead of a path.

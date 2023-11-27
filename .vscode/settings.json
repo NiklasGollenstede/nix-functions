@@ -21,6 +21,7 @@
 		"fetchpatch",
 		"foldl",
 		"gidmapping",
+		"github",
 		"Gollenstede",
 		"loglevel",
 		"lowerdir",
@@ -37,5 +38,6 @@
 		"uidmapping",
 		"upperdir",
 		"workdir",
+		"tmpfiles",
 	],
 }
