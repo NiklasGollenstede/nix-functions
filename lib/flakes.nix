@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mapMerge mapMergeUnique mergeAttrsUnique flipNames;
-    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped;
+    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped packagesFromOverlay;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit extractBashFunction;
     setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
     inherit (import "${dirname}/misc.nix" dirname inputs) trace;
@@ -51,11 +51,16 @@ in rec {
         } else { }) // (let
             it = importWrapped inputs "${flakePath}/overlays";
         in if it.exists then {
-            overlays = { default = mergeOverlays (lib.attrValues it.result); } // it.result;
+            overlays = (lib.optionalAttrs (it.result != { }) { default = mergeOverlays (lib.attrValues it.result); }) // it.result;
+            packages = lib.optionalAttrs (it.result != { }) (packagesFromOverlay { inherit inputs; });
         } else { }) // (let
             it = importWrapped inputs "${flakePath}/modules";
         in if it.exists then {
-            nixosModules = { default = { imports = builtins.attrValues it.result; _file = "${flakePath}/modules#merged"; }; } // it.result;
+            nixosModules = (lib.optionalAttrs (it.result != { }) { default = { imports = builtins.attrValues it.result; _file = "${flakePath}/modules#merged"; }; }) // it.result;
+        } else { }) // (let
+            it = importWrapped inputs "${flakePath}/patches";
+        in if it.exists then {
+            patches = it.result;
         } else { })
     )); in if (builtins.isList result) then mergeFlakeOutputs result else result;
 
