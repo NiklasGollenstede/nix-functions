@@ -36,9 +36,10 @@
 		"pipefail",
 		"pkgs",
 		"shopt",
+		"sublist",
+		"tmpfiles",
 		"uidmapping",
 		"upperdir",
-		"workdir",
-		"tmpfiles",
+		"workdir"
 	],
 }

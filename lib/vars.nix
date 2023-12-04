@@ -27,7 +27,7 @@ in rec {
     );
 
     mergeAttrsRecursive = attrsList: let # slightly adjusted from https://stackoverflow.com/a/54505212
-        merge = attrPath: lib.zipAttrsWith (name: values:
+        merge = attrPath: builtins.zipAttrsWith (name: values:
             if builtins.length values == 1
                 then builtins.head values
             else if builtins.all builtins.isList values

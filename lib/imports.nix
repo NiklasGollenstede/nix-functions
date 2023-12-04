@@ -1,6 +1,6 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) mapMergeUnique mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/vars.nix" dirname inputs) mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
     inherit (import "${dirname}/misc.nix" dirname inputs) trace;
     defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
 in rec {
@@ -105,6 +105,17 @@ in rec {
         ) else { }) thing
     ) else { })) files;
 
+    # Used in »lib/default.nix«, this imports library local library functions and bundles them for exporting as »lib« flake output and local use. Additionally, it imports the ».lib«s defined by input flakes and prepares those and the local library functions for consumption by the local flake.
+    # Each nix file/dir in »lib/« (not listed in »except«) will be imported and added as »lib.${name}« (w/o extension). Additionally, if the imported value is an attribute set and »name« is not in »noSpread«, then the values attributes will be added directly to lib.
+    # Internally, the calling flake can use »lib = inputs.self.lib.__internal__«, which is »inputs.nixpkgs.lib« (i.e, the nix standard library), with the ».lib« output of all »inputs« (including the own lib as »self«) added.
+    # By passing e.g. »rename.too-long = "foo"«, inputs.too-long.lib« will (internally) become »lib.foo«.
+    importLib = inputs: dir: { except ? [ ], noSpread ? [ ], rename ? { }, ... }: let
+        categories = builtins.removeAttrs (importAll inputs dir) except;
+        self = (mergeAttrsUnique (builtins.filter (it: builtins.isAttrs it && !it?__functor) (builtins.attrValues (builtins.removeAttrs categories noSpread)))) // categories;
+        inputs' = builtins.removeAttrs inputs [ "self" ];
+        reexports = builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: { name = if name == "nixpkgs" || !inputs.${name}?lib then null else rename.${name} or name; value = inputs.${name}.lib; }) (builtins.attrNames inputs')));
+    in self // { __internal__ = nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
+
     # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. See »importFilteredFlattened« and »isProbablyModule« for details.
     importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
 
@@ -112,7 +123,7 @@ in rec {
     importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = couldBeOverlay; });
 
     # Used in a »default.nix« and called with the »dir« it is in, this returns an attribute set of all patch files in that directory as (see »getPatchFiles«). Any »*/default.nix« found in »dir« will be imported and added to the result as well, so this function can be used in nested »default.nix«es recursively.
-    importPatches = inputs: dir: opts: (lib.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
+    importPatches = inputs: dir: opts: (builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({
