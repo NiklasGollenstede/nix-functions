@@ -94,7 +94,7 @@ in rec {
                 '';
                     #eval "$( nix --extra-experimental-features 'nix-command flakes' eval "$node_modules"/../nixos#devShells.${localSystem}.default.shellHook --no-eval-cache --raw )"
                 apply-node_modules = node_modules: commit-lock: ''
-                    ${make-immutable} "$node_modules"
+                    if [[ -e $node_modules ]] ; then ${make-immutable} "$node_modules" ; fi
                     ( chmod u+w "$node_modules" ; rm -rf "$node_modules" ) &>/dev/null ; mkdir "$node_modules" || exit
                     ( shopt -s dotglob ; ln -st "$node_modules" ${node_modules}/node_modules/* ) || exit
                     ln -sfT ${make-mutable} "$node_modules"/make-mutable || exit
@@ -103,7 +103,10 @@ in rec {
                 '';
                     #${pkgs.rsync}/bin/rsync --archive --delete --force ${node_modules}/node_modules/ "$node_modules"/ || exit
             in ''
-                node_modules=$PWD/node_modules
+                node_modules=$( while true ; do
+                	if [[ -e package.json ]] ; then echo "$PWD" ; break ; fi
+                	cd .. ; if [[ $PWD == / ]] ; then echo 'Unable to locate a package.json in (parent of) CWD' >&2 ; exit 2 ; fi
+                done )/node_modules || exit
                 ( ${apply-node_modules node_modules-dev commit-lock} ) || exit
                 PATH=$node_modules/.bin:$PATH
                 ${extraShellHook}

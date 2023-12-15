@@ -31,8 +31,9 @@ in rec {
         # A flake has »{ _type = "flake"; inputs; outputs; sourceInfo; } // outputs // sourceInfo«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. Don't know the merge priority.
         # Since nix v2.14, the direct »outPath« has the relative location of the »dir« containing the »flake.nix« as suffix (if not "").
         if (!input?sourceInfo) then sourceInfo else (let
-            outputs = (import "${patched.outPath}${dir}/flake.nix").outputs ({ self = sourceInfo // outputs; } // input.inputs);
-        in outputs // sourceInfo // { _type = "flake"; outPath = "${patched.outPath}${dir}"; inherit (input) inputs; inherit outputs; inherit sourceInfo; })
+            outputs = (import "${patched.outPath}${dir}/flake.nix").outputs ({ inherit self; } // input.inputs);
+            self = outputs // sourceInfo // { _type = "flake"; outPath = "${patched.outPath}${dir}"; inherit (input) inputs; inherit outputs; inherit sourceInfo; };
+        in self)
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
@@ -44,7 +45,9 @@ in rec {
         flakeDir = lib.removePrefix componentName pathSuffix;
         flakePath = "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}"; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (when cast to a string, because it copies it).
     in let result = (outputs (
-        (let
+        {
+            outPath = flakePath; # Nix 2.14 starts setting this correctly for all actual inputs, but not for inputs.self
+        } // (let
             it = importWrapped inputs "${flakePath}/lib";
         in if it.exists then {
             lib = it.result;
