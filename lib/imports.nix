@@ -136,18 +136,18 @@ in rec {
     # Given an attrset of nix flake »inputs«, returns the list of all default NixOS modules defined by those other flakes (non-recursive).
     getModulesFromInputs = inputs: (lib.remove null (map (input: if input?nixosModules.default then input.nixosModules.default else if input?nixosModule then input.nixosModule else null) (builtins.attrValues inputs)));
 
-    # Given a list of »overlays« and »pkgs« with them applied, returns the subset of »pkgs« that was directly modified by the overlays.
+    # Given a list of »overlays« and »pkgs« with them applied, returns the subset (of derivations and things that contain derivations) of »pkgs« that was directly modified (returned) by the overlays.
     # (But this only works for top-level / non-scoped packages.)
     getModifiedPackages = pkgs: overlays: let
         getNames = overlay: builtins.attrNames (overlay pkgs pkgs);
         names = if overlays?default then getNames overlays.default else builtins.concatLists (map getNames (builtins.attrValues overlays));
-    in mapMergeUnique (name: if lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
+    in mapMergeUnique (name: if pkgs.${name}?recurseForDerivations || lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     # Automatically builds a flakes »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
     packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? [ ], exclude ? [ ], ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { system = localSystem; });
         packages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
-    in (builtins.removeAttrs packages exclude)
+    in (builtins.removeAttrs (lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) packages) exclude)
     // (if lib.isList extra then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) extra) else extra pkgs)
     // (if default != null then { default = default pkgs; } else { }));
 

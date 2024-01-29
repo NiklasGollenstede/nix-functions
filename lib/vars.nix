@@ -14,7 +14,7 @@ in rec {
     mapMergeUnique = toAttr: listOrAttrs: mergeAttrsUnique (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
 
     # Given a list of attribute sets, returns the merged set of all contained attributes, with those in elements with higher indices taking precedence.
-    mergeAttrs = attrsList: builtins.foldl' (a: b: a // b) { } attrsList;
+    mergeAttrs = attrsList: lib.foldl (a: b: a // b) { } attrsList; # (Do not (ever?) use »foldl'«!)
 
     # Given a list of attribute sets, returns the merged set of all contained attributes. Throws if the same attribute name occurs more than once.
     mergeAttrsUnique = attrsList: let

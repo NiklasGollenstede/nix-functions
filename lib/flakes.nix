@@ -69,7 +69,7 @@ in rec {
 
     ## Composes a single (nixpkgs) overlay that applies a list of overlays, low indices first.
     mergeOverlays = overlays: (
-        final: prev: builtins.foldl' (acc: overlay: acc // (overlay final (prev // acc))) { } overlays
+        final: prev: lib.foldl (acc: overlay: acc // (overlay final (prev // acc))) { } overlays
     );
 
     # Combines »patchFlakeInputs« and »importRepo« in a single call. E.g.:
@@ -89,7 +89,7 @@ in rec {
     mergeFlakeOutputs = outputList: builtins.zipAttrsWith (type: values: (
         if ((builtins.length values) == 1) then (builtins.head values)
         else if (builtins.all builtins.isAttrs values) then (builtins.zipAttrsWith (system: values: mergeAttrsUnique values) values)
-        else throw "Outputs.${type} has multiple values which are not all attribute sets, can't merge."
+        else throw "outputs.${type} has multiple values, but not all attribute sets. Can't merge."
     )) outputList;
 
 }
