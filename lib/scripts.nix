@@ -45,6 +45,9 @@ in rec {
         parsedScripts = map (source: rec {
             text = if builtins.isAttrs source then source.text else builtins.readFile source; name = if builtins.isAttrs source then source.name else builtins.baseNameOf source;
             parsed = builtins.split ''@\{([#!]?)([a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9](![a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9])?)([:*@\[#%/^,\}])'' text; # (first part of a bash parameter expansion, with »@« instead of »$«)
+            processed = builtins.concatStringsSep "" (map (seg: if builtins.isString seg then seg else (
+                "$"+"{"+(builtins.head seg)+(builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] (builtins.elemAt seg 1))+(toString (builtins.elemAt seg 3))
+            )) parsed);
         }) args.scripts;
         decls = lib.unique (map (match: builtins.elemAt match 1) (builtins.filter builtins.isList (builtins.concatMap (script: script.parsed) parsedScripts)));
         vars = builtins.listToAttrs (map (decl: let
@@ -53,7 +56,7 @@ in rec {
             resolved = lib.attrByPath path null context;
             applied = if call == null || resolved == null then resolved else (let
                 split = builtins.filter builtins.isString (builtins.split "[.]" call); name = builtins.head split; args = builtins.tail split;
-                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or self.lib.${name} or (pkgs.lib or lib).${name} or pkgs.${name} or builtins.${name}) args;
+                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or inputs.self.lib.${name} or (pkgs.lib or lib).${name} or pkgs.${name} or builtins.${name}) args;
             in func resolved);
         in { name = decl; value = applied; }) decls);
         bash-ify = decl: applied: let
@@ -75,17 +78,16 @@ in rec {
             else if (builtins.isAttrs value) then "declare -A ${name}=${toStringRecursive value}"
             else throw "Can't use value of unsupported type ${builtins.typeOf} as substitution for ${decl}" # builtins.isFunction
         ); in trace final final);
-        declarations = pkgs.writeText "vars" ("#!/usr/bin/env bash\n" + (builtins.concatStringsSep "\n" (lib.mapAttrsToList (bash-ify) vars)));
-        processedScripts = map (script: pkgs.writeScript script.name (
-            builtins.concatStringsSep "" (map (seg: if builtins.isString seg then seg else (
-                "$"+"{"+(builtins.head seg)+(builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] (builtins.elemAt seg 1))+(toString (builtins.elemAt seg 3))
-            )) script.parsed)
-        )) parsedScripts;
-        script = ''
-            source ${declarations}
-            ${builtins.concatStringsSep "\n" (map (script: "source ${script}") processedScripts)}
-        '';
-    in { __toString = _: script; inherit script decls vars bash-ify; scripts = [ declarations ] ++ processedScripts; };
+        scriptsDir = writeTextFiles pkgs "scripts" { executable = "*"; } (
+            (builtins.listToAttrs (map (script: { name = builtins.unsafeDiscardStringContext script.name; value = script.processed; }) parsedScripts)
+        ) // {
+            __vars__ = builtins.concatStringsSep "\n" (lib.mapAttrsToList (bash-ify) vars);
+        });
+        script = builtins.concatStringsSep "\n" ([ "source ${scriptsDir}/__vars__" ] ++ (map (script: "source ${scriptsDir}/${script.name}") parsedScripts));
+    in {
+        __toString = _: script; inherit script decls vars bash-ify scriptsDir;
+        scripts = map (name: "${scriptsDir}/${name}") (builtins.attrNames scriptsDir.files);
+    };
 
     ## Given a bash »script« as string and a function »name«, this finds and extracts the definition of that function in and from the script.
     #  The function definition has to start at the beginning of a line and must end on the next line that is a sole »}« or »)}«.
@@ -94,6 +96,34 @@ in rec {
         #inherit (extractLineAnchored ''${name}[ ]*[(][ ]*[)]|function[ ]+${name}[^A-Za-z0-9_-]?[^\n]*'' true true script) line after;
         body = builtins.split "(\n[)]?[}])[ ]*([#][^\n]*)?\n" after;
     in if (builtins.length body) < 3 then null else line + (builtins.head body) + (builtins.head (builtins.elemAt body 1));
+
+    writeTextFiles = pkgs: name: args@{
+        destination ? "", # relative path appended to $out eg "/bin"
+        executable ? "",  # run chmod +x ?
+        checkPhase ? "",  # syntax checks, e.g. for scripts
+    ... }: files: let
+        texts = builtins.attrValues files;
+        passAsFiles = builtins.listToAttrs (builtins.genList (i: { name = "text_${toString i}"; value = builtins.elemAt texts i; }) (builtins.length texts));
+    in pkgs.runCommand name (args // passAsFiles // rec {
+        fileNames = builtins.concatStringsSep "\n" (builtins.attrNames files); passAsFile = [ "fileNames" ] ++ builtins.attrNames passAsFiles;
+        passthru = (args.passthru or { }) // { inherit files; };
+    }) ''
+        set -x
+        mkdir -p $out ; cd $out
+        if [[ $destination ]] ; then mkdir -p $destination ; cd $destination ; fi
+
+        readarray -t fileNames <$fileNamesPath
+        index=0 ; for name in "''${fileNames[@]}" ; do
+            mkdir -p "$( dirname "$name" )"
+            declare var=text_$(( index++ ))Path
+            mv "''${!var}" "$name"
+            #mv "''${!text_$(( index++ ))Path}" "$name"
+        done
+
+        ls -al
+        if [[ "$executable" ]]; then chmod +x $executable ; fi
+        cd $out ; eval "$checkPhase"
+    '';
 
     # Used as a »system.activationScripts« snippet, this performs substitutions on a »text« before writing it to »path«.
     # For each name-value pair in »substitutes«, all verbatim occurrences of the attribute name in »text« are replaced by the content of the file with path of the attribute value.

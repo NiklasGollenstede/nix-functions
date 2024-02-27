@@ -5,6 +5,8 @@ in rec {
 
     ## Logic Flow
 
+    assertAll = assertions: pass: builtins.deepSeq (map ({ assertion, message, }: if !assertion then throw message else null) assertions) pass;
+
     notNull = value: value != null;
 
     ifNull      = value: default:   (if   value == null then default else value);
