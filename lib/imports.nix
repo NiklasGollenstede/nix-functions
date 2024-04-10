@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
-    inherit (import "${dirname}/misc.nix" dirname inputs) trace;
+    #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
     defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
 in rec {
 
@@ -152,10 +152,11 @@ in rec {
     // (if default != null then { default = default pkgs; } else { }));
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
-    exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], ... }: lib.genAttrs systems (localSystem: let
+    exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
-    in (if lib.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
-    // (if default != null then { default = default pkgs; } else { }));
+        packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
+        // (if default != null then { default = default pkgs; } else { });
+    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg.meta?mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; }) packages else packages);
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.
