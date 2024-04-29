@@ -155,7 +155,7 @@ in rec {
     exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
-        // (if default != null then { default = default pkgs; } else { });
+        // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg.meta?mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; }) packages else packages);
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
@@ -190,4 +190,16 @@ in rec {
         (mergeAttrsRecursive ([ { imports = module.imports or [ ]; options = module.options or { }; config = module.config or { }; } ] ++ overrides))
         { disabledModules = [ modulePath ]; }
     ]; };
+
+    ## Evaluates a NixOS module (plus a bit of (input) config for it) in isolation, with the goal that the (output) config created by that module may be retrieved.
+    #  The exact semantics and API of this are still subject to change.
+    evalNixpkgsModule = specialArgs: module: config: lib.evalModules {
+        modules = [
+            { config._module.args = { inherit lib; } // specialArgs; }
+            #{ config._module.freeformType = lib.types.attrsOf lib.types.anything; } # infinite recursion
+            { options = lib.genAttrs [ "appstream" "assertions" "boot" "console" "containers" "docker-containers" "documentation" "dysnomia" "ec2" "environment" "fileSystems" "fonts" "gtk" "hardware" "home-manager" "i18n" "ids" "jobs" "krb5" "lib" "location" "meta" "nesting" "networking" "nix" "nixops" "nixpkgs" "oci" "openstack" "passthru" "power" "powerManagement" "preface" "profiles" "programs" "qt" "qt5" "security" "services" "snapraid" "sound" "specialisation" "stubby" "swapDevices" "system" "systemd" "time" "users" "virtualisation" "warnings" "xdg" "zramSwap" ] (root: lib.mkOption { type = lib.types.anything; }); } # only things in this list may be set in »config« but they then can't be defined as »options«
+            module { inherit config; }
+        ];
+    };
+
 }
