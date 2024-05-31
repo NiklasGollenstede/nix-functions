@@ -197,7 +197,7 @@ in rec {
         modules = [
             { config._module.args = { inherit lib; } // specialArgs; }
             #{ config._module.freeformType = lib.types.attrsOf lib.types.anything; } # infinite recursion
-            { options = lib.genAttrs [ "appstream" "assertions" "boot" "console" "containers" "docker-containers" "documentation" "dysnomia" "ec2" "environment" "fileSystems" "fonts" "gtk" "hardware" "home-manager" "i18n" "ids" "jobs" "krb5" "lib" "location" "meta" "nesting" "networking" "nix" "nixops" "nixpkgs" "oci" "openstack" "passthru" "power" "powerManagement" "preface" "profiles" "programs" "qt" "qt5" "security" "services" "snapraid" "sound" "specialisation" "stubby" "swapDevices" "system" "systemd" "time" "users" "virtualisation" "warnings" "xdg" "zramSwap" ] (root: lib.mkOption { type = lib.types.anything; }); } # only things in this list may be set in »config« but they then can't be defined as »options«
+            { options = lib.genAttrs [ "appstream" "assertions" "boot" "console" "containers" "docker-containers" "documentation" "dysnomia" "ec2" "environment" "fileSystems" "fonts" "gtk" "hardware" "home-manager" "i18n" "ids" "jobs" "krb5" "lib" "location" "meta" "nesting" "networking" "nix" "nixops" "nixpkgs" "oci" "openstack" "passthru" "power" "powerManagement" "preface" "profiles" "programs" "qt" "qt5" "security" "services" "snapraid" "sound" "specialisation" "stubby" "swapDevices" "system" "systemd" "time" "users" "virtualisation" "warnings" "xdg" "zramSwap" ] (root: lib.mkOption { type = lib.types.anything; }); } # only things in this list may be set in »config« but they then can't be defined as »options« # TODO: can lib.mergeModules be used to help with this?
             module { inherit config; }
         ];
     };

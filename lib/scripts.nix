@@ -40,6 +40,7 @@ in rec {
         context, # The root attrset for the resolution of substitutions.
         pkgs, # Instantiated »nixpkgs«, as fallback location for helpers, and to grab »writeScript« etc from.
         helpers ? { }, # Attrset of (highest priority) helper functions.
+        onError ? "exit", # Bash command to run when sourcing any of the scripts failed.
         trace ? (m: v: v), # Function that gets called with the names and values as they are processed. Pass »builtins.trace« for debugging, esp. when evaluating one of the accessed values fails.
     }: let
         parsedScripts = map (source: rec {
@@ -83,7 +84,7 @@ in rec {
         ) // {
             __vars__ = builtins.concatStringsSep "\n" (lib.mapAttrsToList (bash-ify) vars);
         });
-        script = builtins.concatStringsSep "\n" ([ "source ${scriptsDir}/__vars__" ] ++ (map (script: "source ${scriptsDir}/${script.name}") parsedScripts));
+        script = builtins.concatStringsSep "\n" ([ "source ${scriptsDir}/__vars__ || ${onError}" ] ++ (map (script: "source ${scriptsDir}/${script.name} || ${onError}") parsedScripts));
     in {
         __toString = _: script; inherit script decls vars bash-ify scriptsDir;
         scripts = map (name: "${scriptsDir}/${name}") (builtins.attrNames scriptsDir.files);
@@ -104,7 +105,7 @@ in rec {
     ... }: files: let
         texts = builtins.attrValues files;
         passAsFiles = builtins.listToAttrs (builtins.genList (i: { name = "text_${toString i}"; value = builtins.elemAt texts i; }) (builtins.length texts));
-    in pkgs.runCommand name (args // passAsFiles // rec {
+    in pkgs.runCommandLocal name (args // passAsFiles // {
         fileNames = builtins.concatStringsSep "\n" (builtins.attrNames files); passAsFile = [ "fileNames" ] ++ builtins.attrNames passAsFiles;
         passthru = (args.passthru or { }) // { inherit files; };
     }) ''
@@ -121,7 +122,7 @@ in rec {
         done
 
         ls -al
-        if [[ "$executable" ]]; then chmod +x $executable ; fi
+        if [[ "$executable" ]]; then chmod +x -- $executable ; fi
         cd $out ; eval "$checkPhase"
     '';
 

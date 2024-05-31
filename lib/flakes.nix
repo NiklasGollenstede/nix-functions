@@ -1,10 +1,8 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mapMerge mapMergeUnique mergeAttrsUnique flipNames;
+    inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mergeAttrsUnique flipNames;
     inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped packagesFromOverlay;
-    inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit extractBashFunction;
-    setup-scripts = (import "${dirname}/setup-scripts" "${dirname}/setup-scripts"  inputs);
-    inherit (import "${dirname}/misc.nix" dirname inputs) trace;
+    #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
     # Simplified implementation of »flake-utils.lib.eachSystem«.
@@ -53,9 +51,11 @@ in rec {
             lib = it.result;
         } else { }) // (let
             it = importWrapped inputs "${flakePath}/overlays";
+            packages = lib.optionalAttrs (it.result != { }) (packagesFromOverlay { inherit inputs; });
         in if it.exists then {
             overlays = (lib.optionalAttrs (it.result != { }) { default = mergeOverlays (lib.attrValues it.result); }) // it.result;
-            packages = lib.optionalAttrs (it.result != { }) (packagesFromOverlay { inherit inputs; });
+            packages = lib.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages;
+            legacyPackages = lib.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages;
         } else { }) // (let
             it = importWrapped inputs "${flakePath}/modules";
         in if it.exists then {
