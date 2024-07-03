@@ -1,6 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) extractLineAnchored;
+    inherit (import "${dirname}/misc.nix" dirname inputs) ifNull;
 in rec {
 
     # Turns an attr set into a bash dictionary (associative array) declaration, e.g.:
@@ -35,7 +36,7 @@ in rec {
     # * »vars«: attribute set mapping each »decls« entry to its resolved value,
     # * »bash-ify«: function with arguments »decl« and »value« that creates a bash variable declaration (with value assignment),
     # * »scripts«: the processed scripts sourced by main script returned.
-    substituteImplicit = args@{
+    substituteImplicit = lib.makeOverridable (args@{
         scripts, # List of paths to scripts to process and then source in the returned script. Each script may also be an attrset »{ name; text; }« instead of a path.
         context, # The root attrset for the resolution of substitutions.
         pkgs, # Instantiated »nixpkgs«, as fallback location for helpers, and to grab »writeScript« etc from.
@@ -88,12 +89,12 @@ in rec {
     in {
         __toString = _: script; inherit script decls vars bash-ify scriptsDir;
         scripts = map (name: "${scriptsDir}/${name}") (builtins.attrNames scriptsDir.files);
-    };
+    });
 
     ## Given a bash »script« as string and a function »name«, this finds and extracts the definition of that function in and from the script.
     #  The function definition has to start at the beginning of a line and must end on the next line that is a sole »}« or »)}«.
     extractBashFunction = script: name: let
-        inherit (extractLineAnchored ''${name}[ ]*[(][ ]*[)]|function[ ]+${name}[ ]'' true false script) line after;
+        inherit (ifNull (extractLineAnchored ''${name}[ ]*[(][ ]*[)]|function[ ]+${name}[ ]'' true false script) (throw "can't find bash function »${name}«")) line after;
         #inherit (extractLineAnchored ''${name}[ ]*[(][ ]*[)]|function[ ]+${name}[^A-Za-z0-9_-]?[^\n]*'' true true script) line after;
         body = builtins.split "(\n[)]?[}])[ ]*([#][^\n]*)?\n" after;
     in if (builtins.length body) < 3 then null else line + (builtins.head body) + (builtins.head (builtins.elemAt body 1));

@@ -71,12 +71,12 @@ in rec {
         fullPath = if isImplicitDir then "${path}/default.nix" else if isExplicit then path else "${path}.nix";
         # The imported nix value:
         result = import fullPath (if isImplicitDir then path else builtins.dirOf path) inputs;
-        # Whether the import path points to an existing file:
-        exists = isImplicitDir || (builtins.pathExists (if isExplicit then path else "${path}.nix"));
+        # Whether the import path points to an existing nix file that accepts the wrapping arguments:
+        exists = (isImplicitDir || (builtins.pathExists (if isExplicit then path else "${path}.nix"))) && (let imported = import fullPath; in builtins.isFunction imported && builtins.functionArgs imported == { } && builtins.isFunction (imported ""));
         # Return »null« if not ».exists«:
         optional = if exists then result else null;
         # Throw if not ».exists«:
-        required = if exists then result else throw (if isExplicit then "File ${path} does not exist" else "Neither ${path}/default.nix nor ${path}.nix exist");
+        required = if exists then result else throw (if isExplicit then "File ${path} can not be imported as wrapped nix file" else "Neither ${path}/default.nix nor ${path}.nix can not be imported as wrapped nix file");
         # ».result« interpreted as NixOS module, wrapped to preserve the import path:
         module = { _file = fullPath; imports = [ required ]; };
     };
@@ -92,18 +92,19 @@ in rec {
     #         ├── d.nix
     #         └── e.nix.md
     # The top level »default.nix« returns:
-    # { "a" = <filtered>; "b" = <filtered>; "c/d" = <filtered>; "c/e" = <filtered>; }
-    importFilteredFlattened = dir: inputs: { except ? [ ], filter ? (thing: true), wrap ? (path: thing: thing), }: let
-        files = builtins.removeAttrs (getNixFiles dir) except;
+    # { "a" = <wrapped>; "b" = <wrapped>; "c/d" = <wrapped>; "c/e" = <wrapped>; }
+    importFilteredFlattened = dir: inputs: { except ? [ ], filter ? (thing: true), default ? null, wrap ? (path: thing: thing), }: let
+        dirs = builtins.mapAttrs (__: _: null) (lib.filterAttrs (__: _:_ == "directory") (builtins.readDir dir));
+        files = getNixFiles dir;
     in mapMergeUnique (name: path: let
-        thing = import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs;
-    in if (filter thing) then (
+        thing = if path == null then if default == null then null else default "${dir}/${name}" else (importWrapped inputs path).optional;
+    in if thing != null && filter thing then (
         { ${name} = wrap path thing; }
     ) else (if (builtins.isAttrs thing) then (
         mapMergeUnique (name': thing': if (filter thing') then (
             { "${name}/${name'}" = thing'; }
         ) else { }) thing
-    ) else { })) files;
+    ) else { })) (builtins.removeAttrs (dirs // files) except);
 
     # Used in »lib/default.nix«, this imports library local library functions and bundles them for exporting as »lib« flake output and local use. Additionally, it imports the ».lib«s defined by input flakes and prepares those and the local library functions for consumption by the local flake.
     # Each nix file/dir in »lib/« (not listed in »except«) will be imported and added as »lib.${name}« (w/o extension). Additionally, if the imported value is an attribute set and »name« is not in »noSpread«, then the values attributes will be added directly to lib.
@@ -116,14 +117,23 @@ in rec {
         reexports = builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: { name = if name == "nixpkgs" || !inputs.${name}?lib then null else rename.${name} or name; value = inputs.${name}.lib; }) (builtins.attrNames inputs')));
     in self // { __internal__ = nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
 
-    # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. See »importFilteredFlattened« and »isProbablyModule« for details.
-    importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
+    # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. See »importFilteredFlattened« and »isProbablyModule« for details.
+    importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({
+        except = [ "default" ]; default = dir: importModules inputs dir opts;
+    } // opts // { filter = isProbablyModule; wrap = path: module: { _file = path; imports = [ module ]; }; });
 
-    # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as an attribute set. See »importFilteredFlattened« and »couldBeOverlay« for details.
-    importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({ except = [ "default" ]; } // opts // { filter = couldBeOverlay; });
+    # Used in a »default.nix« and called with the »dir« it is in, imports all overlays in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. See »importFilteredFlattened« and »couldBeOverlay« for details.
+    importOverlays = inputs: dir: opts: importFilteredFlattened dir inputs ({
+        except = [ "default" ]; default = dir: importOverlays inputs dir opts;
+    } // opts // { filter = couldBeOverlay; });
 
-    # Used in a »default.nix« and called with the »dir« it is in, this returns an attribute set of all patch files in that directory as (see »getPatchFiles«). Any »*/default.nix« found in »dir« will be imported and added to the result as well, so this function can be used in nested »default.nix«es recursively.
-    importPatches = inputs: dir: opts: (builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
+    # Used in a »default.nix« and called with the »dir« it is in, this returns an attribute set of all patch files in that directory as (see »getPatchFiles«). Importing automatically recurses into directories without explicit »default.nix«. Any explicit »*/default.nix« found in »dir« will be imported and added to the result as well, so this function can be used in nested »default.nix«es recursively.
+    importPatches = inputs: dir: opts: (builtins.mapAttrs (name: _: importPatches inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.readDir dir))) // (builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
+
+    # Used in a »default.nix« and called with the »dir« it is in, imports all package definitions in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. Any nix file that returns a function is considered a package definition. See »importFilteredFlattened«.
+    importPkgsDefs = inputs: dir: opts: importFilteredFlattened dir inputs ({
+        except = [ "default" ]; default = dir: importPkgsDefs inputs dir opts;
+    } // opts // { filter = builtins.isFunction; });
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({

@@ -5,7 +5,7 @@
 function generic-arg-verify { # 1?: exitCode
     local exitCode=${exitCode:-${1:-1}}
     local names=' '"${!allowedArgs[@]}"
-    for name in "${!args[@]}" ; do
+    local name ; for name in "${!args[@]}" ; do
         if [[ ${allowedArgs[--$name]:-} ]] ; then
             if [[ ${args[$name]} == '' || ${args[$name]} == 1 ]] ; then continue ; fi
             echo "Argument »--$name« should be a boolean, but its value is: ${args[$name]}" 1>&2 ; \return $exitCode

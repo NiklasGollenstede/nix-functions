@@ -1,7 +1,6 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
+dirname: { self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) startsWith;
-in rec {
+in {
 
     ## Logic Flow
 

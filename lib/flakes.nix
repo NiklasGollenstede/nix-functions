@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mergeAttrsUnique flipNames;
-    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped packagesFromOverlay;
+    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped importModules importOverlays importPkgsDefs importPatches packagesFromOverlay;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
@@ -34,43 +34,70 @@ in rec {
         in self)
     )) else input) inputs);
 
-    # Generates implicit flake outputs by importing conventional paths in the local repo. E.g.:
+    # Generates implicit flake outputs by importing conventional paths in the local repo. Usage:
     #     outputs = inputs@{ self, nixpkgs, functions, ... }: functions.lib.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
     # If the `flake.nix` is in a sub dir (e.g., `nix`) of a repo and some of the (implicitly) imported files need to reference something outside that sub dir, then the path needs to passed like this: `"${../.}/nix"` (i.e, a native nix path out to the root of the repo (/what needs to be referenced) and then a string path back do the flake dir).
-    importRepo = inputs: flakePath': outputs: let
-        pathSuffix = lib.removePrefix "${builtins.storeDir}/" flakePath';
-        componentName = builtins.head (builtins.split "/" pathSuffix);
-        flakeDir = lib.removePrefix componentName pathSuffix;
-        flakePath = "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}"; # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (when cast to a string, because it copies it).
-    in let result = (outputs (
-        {
-            outPath = flakePath; # Nix 2.14 starts setting this correctly for all actual inputs, but not for inputs.self
-        } // (let
-            it = importWrapped inputs "${flakePath}/lib";
-        in if it.exists then {
-            lib = it.result;
-        } else { }) // (let
-            it = importWrapped inputs "${flakePath}/overlays";
-            packages = lib.optionalAttrs (it.result != { }) (packagesFromOverlay { inherit inputs; });
-        in if it.exists then {
-            overlays = (lib.optionalAttrs (it.result != { }) { default = mergeOverlays (lib.attrValues it.result); }) // it.result;
-            packages = lib.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages;
-            legacyPackages = lib.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages;
-        } else { }) // (let
-            it = importWrapped inputs "${flakePath}/modules";
-        in if it.exists then {
-            nixosModules = (lib.optionalAttrs (it.result != { }) { default = { imports = builtins.attrValues it.result; _file = "${flakePath}/modules#merged"; }; }) // it.result;
-        } else { }) // (let
-            it = importWrapped inputs "${flakePath}/patches";
-        in if it.exists then {
-            patches = it.result;
-        } else { })
-    )); in if (builtins.isList result) then mergeFlakeOutputs result else result;
+    importRepo = inputs: flakePath: outputs: let
+        repo = (lib.makeOverridable getRepo) rec {
+            inherit inputs;
+            path = let # Referring to the current flake directory as »./.« is quite intuitive (and »inputs.self.outPath« causes infinite recursion), but without this it adds another hash to the path (when cast to a string, because it copies it).
+                pathSuffix = lib.removePrefix "${builtins.storeDir}/" flakePath;
+                componentName = builtins.head (builtins.split "/" pathSuffix);
+                flakeDir = lib.removePrefix componentName pathSuffix;
+            in "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}";
+            dirs = builtins.mapAttrs (__: _:_ == "directory") (builtins.readDir path);
+        };
+        getRepo = { inputs, path, dirs, overlaysFromPkgs ? true, overlaysFromPatches ? false, }: let
+            hasDir = dir: dirs.${dir} or false == true;
+
+            lib' = importWrapped inputs "${path}/lib";
+            # (don't shadow "lib")
+
+            overlays = let
+                overlays' = importWrapped inputs "${path}/overlays";
+                overlays = if overlays'.exists then overlays'.result else if hasDir "overlays" then importOverlays inputs "${path}/overlays" { } else { };
+                pkgsDefs' = importWrapped inputs "${path}/pkgs";
+                pkgsDefs = if pkgsDefs'.exists then pkgsDefs'.result else if hasDir "pkgs" then importPkgsDefs inputs "${path}/pkgs" { } else { };
+                fromPkgs = builtins.mapAttrs (name: def: (final: prev: {
+                    ${name} = final.callPackage def { };
+                })) pkgsDefs;
+                fromPatches = builtins.mapAttrs (name: patch: (final: prev: let
+                    pname = builtins.head (builtins.split "/" name); pkg = prev.${pname};
+                in if prev?${pname} && lib.isDerivation pkg then {
+                    ${pname} = pkg.overrideAttrs (old: { patches = (old.patches or [ ]) ++ (if (builtins.isAttrs patch) && !(lib.isDerivation patch) then builtins.attrNames patch else [ patch ]); });
+                } else { })) patches;
+                merged = (lib.optionalAttrs overlaysFromPatches fromPatches) // (lib.optionalAttrs overlaysFromPkgs fromPkgs) // overlays;
+            in (lib.optionalAttrs (merged != { }) { default = lib.composeManyExtensions (builtins.attrValues merged); }) // merged;
+
+            packages' = packagesFromOverlay { inherit inputs; };
+            packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');
+            legacyPackages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages');
+
+            modules' = importWrapped inputs "${path}/modules";
+            modules = if modules'.exists then modules'.result else if hasDir "modules" then importModules inputs "${path}/modules" { } else { };
+            nixosModules = (lib.optionalAttrs (modules != { }) { default = { imports = builtins.attrValues modules; _file = "${path}/modules#merged"; }; }) // modules;
+
+            patches' = importWrapped inputs "${path}/patches";
+            patches = if patches'.exists then patches'.result else if hasDir "patches" then importPatches inputs "${path}/patches" { } else { };
+
+        in (
+            (if lib'.exists then { lib = lib'.result; } else { })
+            // (/* if overlays == { } then { } else */ { inherit overlays; })
+            // (/* if packages == { } then { } else */ { inherit packages; })
+            // (/* if legacyPackages == { } then { } else */ { inherit legacyPackages; })
+            // (/* if nixosModules == { } then { } else */ { inherit nixosModules; })
+            // (/* if patches == { } then { } else */ { inherit patches; })
+            // { outPath = path; } # Nix 2.14 starts setting this correctly for all actual inputs, but not for inputs.self
+        );
+
+        result = outputs repo;
+    in if (builtins.isList result) then mergeFlakeOutputs result else result;
 
     ## Composes a single (nixpkgs) overlay that applies a list of overlays, low indices first.
     mergeOverlays = overlays: (
         final: prev: lib.foldl (acc: overlay: acc // (overlay final (prev // acc))) { } overlays
     );
+    # lib.composeManyExtensions
 
     # Combines »patchFlakeInputs« and »importRepo« in a single call. E.g.:
     # outputs = inputs: let patches = {
@@ -88,8 +115,14 @@ in rec {
     # Merges a list of flake output attribute sets.
     mergeFlakeOutputs = outputList: builtins.zipAttrsWith (type: values: (
         if ((builtins.length values) == 1) then (builtins.head values)
-        else if (builtins.all builtins.isAttrs values) then (builtins.zipAttrsWith (system: values: mergeAttrsUnique values) values)
+        else if (builtins.all builtins.isAttrs values) then (builtins.zipAttrsWith (system: values: (
+            if ((builtins.length values) == 1) then (builtins.head values)
+            else if (builtins.all builtins.isAttrs values) then (mergeAttrsUnique values)
+            else throw "outputs.${type}.${system} has multiple values, but not all attribute sets. Can't merge."
+        )) values)
         else throw "outputs.${type} has multiple values, but not all attribute sets. Can't merge."
-    )) outputList;
+    )) (map ( # It is quite reasonable that things meant for export are made »lib.makeOverridable«, but that does not mean that the »override« (of one outputs component) should be exported.
+        outputs: builtins.removeAttrs outputs [ "override" "overrideDerivation" ]
+    ) outputList);
 
 }
