@@ -58,7 +58,7 @@ in rec {
             resolved = lib.attrByPath path null context;
             applied = if call == null || resolved == null then resolved else (let
                 split = builtins.filter builtins.isString (builtins.split "[.]" call); name = builtins.head split; args = builtins.tail split;
-                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or inputs.self.lib.${name} or (pkgs.lib or lib).${name} or pkgs.${name} or builtins.${name}) args;
+                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or inputs.self.lib.${name} or (pkgs.lib or nixpkgs.lib).${name} or pkgs.${name} or builtins.${name}) args;
             in func resolved);
         in { name = decl; value = applied; }) decls);
         bash-ify = decl: applied: let
@@ -101,7 +101,7 @@ in rec {
 
     writeTextFiles = pkgs: name: args@{
         destination ? "", # relative path appended to $out eg "/bin"
-        executable ? "",  # run chmod +x ?
+        executable ? "",  # optional shell globs of paths to run »chmod +x« on
         checkPhase ? "",  # syntax checks, e.g. for scripts
     ... }: files: let
         texts = builtins.attrValues files;
@@ -110,19 +110,16 @@ in rec {
         fileNames = builtins.concatStringsSep "\n" (builtins.attrNames files); passAsFile = [ "fileNames" ] ++ builtins.attrNames passAsFiles;
         passthru = (args.passthru or { }) // { inherit files; };
     }) ''
-        set -x
         mkdir -p $out ; cd $out
-        if [[ $destination ]] ; then mkdir -p $destination ; cd $destination ; fi
+        if [[ $destination ]] ; then mkdir -p "$destination" ; cd "$destination" ; fi
 
         readarray -t fileNames <$fileNamesPath
         index=0 ; for name in "''${fileNames[@]}" ; do
             mkdir -p "$( dirname "$name" )"
             declare var=text_$(( index++ ))Path
             mv "''${!var}" "$name"
-            #mv "''${!text_$(( index++ ))Path}" "$name"
         done
 
-        ls -al
         if [[ "$executable" ]]; then chmod +x -- $executable ; fi
         cd $out ; eval "$checkPhase"
     '';

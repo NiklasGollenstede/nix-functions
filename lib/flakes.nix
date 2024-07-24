@@ -57,7 +57,7 @@ in rec {
                 overlays' = importWrapped inputs "${path}/overlays";
                 overlays = if overlays'.exists then overlays'.result else if hasDir "overlays" then importOverlays inputs "${path}/overlays" { } else { };
                 pkgsDefs' = importWrapped inputs "${path}/pkgs";
-                pkgsDefs = if pkgsDefs'.exists then pkgsDefs'.result else if hasDir "pkgs" then importPkgsDefs inputs "${path}/pkgs" { } else { };
+                pkgsDefs = if pkgsDefs'.exists then pkgsDefs'.result else if hasDir "pkgs" then importPkgsDefs inputs "${path}/pkgs" { merge = "splice"; } else { };
                 fromPkgs = builtins.mapAttrs (name: def: (final: prev: {
                     ${name} = final.callPackage def { };
                 })) pkgsDefs;

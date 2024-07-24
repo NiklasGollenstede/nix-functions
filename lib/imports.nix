@@ -1,7 +1,9 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
+    bash = import "${dirname}/bash" "${dirname}/bash" inputs;
     defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
 in rec {
 
@@ -11,7 +13,6 @@ in rec {
     in if (match != null) then {
         name = builtins.head match; value = "${dir}/${name}";
     } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
-
 
     # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file, in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
     getNixFiles = dir: mapMergeUnique (name: type: if (type == "directory") then (
@@ -93,15 +94,18 @@ in rec {
     #         └── e.nix.md
     # The top level »default.nix« returns:
     # { "a" = <wrapped>; "b" = <wrapped>; "c/d" = <wrapped>; "c/e" = <wrapped>; }
-    importFilteredFlattened = dir: inputs: { except ? [ ], filter ? (thing: true), default ? null, wrap ? (path: thing: thing), }: let
+    importFilteredFlattened = dir: inputs: { except ? [ ], filter ? (thing: true), default ? null, wrap ? (path: thing: thing), merge ? null, }: let
         dirs = builtins.mapAttrs (__: _: null) (lib.filterAttrs (__: _:_ == "directory") (builtins.readDir dir));
         files = getNixFiles dir;
     in mapMergeUnique (name: path: let
         thing = if path == null then if default == null then null else default "${dir}/${name}" else (importWrapped inputs path).optional;
+        merge' = thing.__mergeMode or merge;
     in if thing != null && filter thing then (
         { ${name} = wrap path thing; }
-    ) else (if (builtins.isAttrs thing) then (
-        mapMergeUnique (name': thing': if (filter thing') then (
+    ) else (if (builtins.isAttrs thing) && merge' == "splice" then (
+        builtins.removeAttrs (lib.filterAttrs (_: filter) thing) [ "__mergeMode" ] # (TODO: filtering is not recursive)
+    ) else if (builtins.isAttrs thing) then (
+        mapMerge (name': thing': if (filter thing') then (
             { "${name}/${name'}" = thing'; }
         ) else { }) thing
     ) else { })) (builtins.removeAttrs (dirs // files) except);
@@ -128,12 +132,37 @@ in rec {
     } // opts // { filter = couldBeOverlay; });
 
     # Used in a »default.nix« and called with the »dir« it is in, this returns an attribute set of all patch files in that directory as (see »getPatchFiles«). Importing automatically recurses into directories without explicit »default.nix«. Any explicit »*/default.nix« found in »dir« will be imported and added to the result as well, so this function can be used in nested »default.nix«es recursively.
-    importPatches = inputs: dir: opts: (builtins.mapAttrs (name: _: importPatches inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.readDir dir))) // (builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))) // (getPatchFiles dir);
+    importPatches = inputs: dir: opts: ( # (recurse implicitly)
+        builtins.mapAttrs (name: _: importPatches inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
+    ) // ( # (recurse explicitly)
+        builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
+    ) // (getPatchFiles dir); # (actual import)
 
     # Used in a »default.nix« and called with the »dir« it is in, imports all package definitions in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. Any nix file that returns a function is considered a package definition. See »importFilteredFlattened«.
     importPkgsDefs = inputs: dir: opts: importFilteredFlattened dir inputs ({
         except = [ "default" ]; default = dir: importPkgsDefs inputs dir opts;
     } // opts // { filter = builtins.isFunction; });
+
+    importScripts = inputs: dir: opts: ( # (recurse implicitly)
+        builtins.mapAttrs (name: _: importPatches inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
+    ) // ( # (recurse explicitly)
+        builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
+        # (actual import:)
+    ) // (lib.mapAttrs (name: path: ({
+        writeShellScriptBin, pkgs, lib, helpers ? { },
+        context ? { }, preScript ? "", postScript ? "",
+    }: let
+        scripts = substituteImplicit { inherit helpers pkgs; scripts = [ path ]; context = {
+            dirname = dir; inherit inputs pkgs lib; outputs = inputs.self;
+        } // (opts.context or { }) // context; };
+    in (
+        (writeShellScriptBin name ''
+            source ${bash.generic-arg-parse}
+            source ${bash.generic-arg-verify}
+            source ${bash.generic-arg-help}
+            ${preScript} ${"\n"} ${scripts} ${"\n"} ${postScript}
+        '').overrideAttrs (old: { passthru = { inherit scripts; src = path; }; })
+    ))) (getFilesExt "sh(.md)?" dir));
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({
