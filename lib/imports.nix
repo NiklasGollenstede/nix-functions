@@ -77,9 +77,9 @@ in rec {
         # Return »null« if not ».exists«:
         optional = if exists then result else null;
         # Throw if not ».exists«:
-        required = if exists then result else throw (if isExplicit then "File ${path} can not be imported as wrapped nix file" else "Neither ${path}/default.nix nor ${path}.nix can not be imported as wrapped nix file");
+        required = if exists then result else throw (if isExplicit then "File ${path} can not be imported as wrapped nix file" else "Neither ${path}/default.nix nor ${path}.nix can be imported as wrapped nix file");
         # ».result« interpreted as NixOS module, wrapped to preserve the import path:
-        module = { _file = fullPath; imports = [ required ]; };
+        module = { _file = fullPath; imports = [ required ]; }; # == lib.setDefaultModuleLocation fullPath required
     };
 
     ## Returns an attrset that, for each file in »dir« (except ...), imports that file and exposes only if the result passes »filter«. If provided, the imported value is »wrapped« after filtering.
@@ -183,19 +183,21 @@ in rec {
     in mapMergeUnique (name: if pkgs.${name}?recurseForDerivations || lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     # Automatically builds a flakes »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
-    packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? [ ], exclude ? [ ], ... }: lib.genAttrs systems (localSystem: let
+    packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { system = localSystem; });
-        packages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
-    in (builtins.removeAttrs (lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) packages) exclude)
-    // (if lib.isList extra then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) extra) else extra pkgs)
-    // (if default != null then { default = default pkgs; } else { }));
+        modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
+        compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
+        withExtras = (builtins.removeAttrs compatiblePackages exclude)
+        // (if lib.isList extra then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) extra) else extra pkgs)
+        // (if default != null then { default = default pkgs; } else { });
+    in apply pkgs withExtras);
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
     exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
-    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg.meta?mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; }) packages else packages);
+    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg.meta?mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; derivation = pkg; }) packages else packages);
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.

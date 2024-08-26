@@ -47,7 +47,10 @@ in rec {
             in "${builtins.path { path = "${builtins.storeDir}/${componentName}"; name = "source"; }}${flakeDir}";
             dirs = builtins.mapAttrs (__: _:_ == "directory") (builtins.readDir path);
         };
-        getRepo = { inputs, path, dirs, overlaysFromPkgs ? true, overlaysFromPatches ? false, }: let
+        getRepo = {
+            inputs, path, dirs,
+            overlaysFromPkgs ? true, overlaysFromPatches ? true, applyToPackages ? pkgs: packages: packages,
+        }: let
             hasDir = dir: dirs.${dir} or false == true;
 
             lib' = importWrapped inputs "${path}/lib";
@@ -61,15 +64,16 @@ in rec {
                 fromPkgs = builtins.mapAttrs (name: def: (final: prev: {
                     ${name} = final.callPackage def { };
                 })) pkgsDefs;
-                fromPatches = builtins.mapAttrs (name: patch: (final: prev: let
-                    pname = builtins.head (builtins.split "/" name); pkg = prev.${pname};
-                in if prev?${pname} && lib.isDerivation pkg then {
-                    ${pname} = pkg.overrideAttrs (old: { patches = (old.patches or [ ]) ++ (if (builtins.isAttrs patch) && !(lib.isDerivation patch) then builtins.attrNames patch else [ patch ]); });
-                } else { })) patches;
+                fromPatches = builtins.mapAttrs (names: patches: (final: prev: let
+                    rename = match != null; match = builtins.match "(.+)[+](.+)" names;
+                    prevName = if !rename then names else builtins.head match; aftName = if !rename then names else "${builtins.head match}-${builtins.elemAt match 1}";
+                in {
+                    ${aftName} = if prev?${prevName}.overrideAttrs then prev.${prevName}.overrideAttrs (old: (lib.optionalAttrs rename { pname = aftName; }) // { patches = (old.patches or [ ]) ++ builtins.attrValues patches; }) else null;
+                })) (lib.filterAttrs (_: it: builtins.isAttrs it && !(lib.isDerivation it)) patches); # //patches/*/ -> attrs
                 merged = (lib.optionalAttrs overlaysFromPatches fromPatches) // (lib.optionalAttrs overlaysFromPkgs fromPkgs) // overlays;
             in (lib.optionalAttrs (merged != { }) { default = lib.composeManyExtensions (builtins.attrValues merged); }) // merged;
 
-            packages' = packagesFromOverlay { inherit inputs; };
+            packages' = packagesFromOverlay { inherit inputs; apply = applyToPackages; };
             packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');
             legacyPackages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages');
 

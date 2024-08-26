@@ -100,9 +100,9 @@ in rec {
     in if (builtins.length body) < 3 then null else line + (builtins.head body) + (builtins.head (builtins.elemAt body 1));
 
     writeTextFiles = pkgs: name: args@{
-        destination ? "", # relative path appended to $out eg "/bin"
-        executable ? "",  # optional shell globs of paths to run »chmod +x« on
-        checkPhase ? "",  # syntax checks, e.g. for scripts
+        destination ? "", # relative path appended to $out (and cwd), e.g. "bin"
+        executable ? "",  # optional shell globs of paths to run »chmod +x« on, e.g. "bin/*"
+        checkPhase ? "",  # syntax checks, e.g. for scripts: ''for f in "''${fileNames[@]}" ; do ${stdenv.shellDryRun} "$f" ; done''
     ... }: files: let
         texts = builtins.attrValues files;
         passAsFiles = builtins.listToAttrs (builtins.genList (i: { name = "text_${toString i}"; value = builtins.elemAt texts i; }) (builtins.length texts));
@@ -111,7 +111,7 @@ in rec {
         passthru = (args.passthru or { }) // { inherit files; };
     }) ''
         mkdir -p $out ; cd $out
-        if [[ $destination ]] ; then mkdir -p "$destination" ; cd "$destination" ; fi
+        if [[ $destination ]] ; then mkdir -p "''${destination#/}" ; cd "''${destination#/}" ; fi
 
         readarray -t fileNames <$fileNamesPath
         index=0 ; for name in "''${fileNames[@]}" ; do
@@ -124,23 +124,23 @@ in rec {
         cd $out ; eval "$checkPhase"
     '';
 
-    # Used as a »system.activationScripts« snippet, this performs substitutions on a »text« before writing it to »path«.
+    # Used as a bash script snippet, this performs substitutions on a »text« before writing it to »path«.
     # For each name-value pair in »substitutes«, all verbatim occurrences of the attribute name in »text« are replaced by the content of the file with path of the attribute value.
     # Since this happens one by one in no defined order, the attribute values should be chosen such that they don't appear in any of the files that are substituted in.
-    # If a file that is supposed to be substituted in is missing, then »placeholder« is inserted instead, and the activation snipped reports a failure.
-    # If »enable« is false, then the file at »path« is »rm«ed instead.
-    writeSubstitutedFile = { enable ? true, path, text, substitutes, placeholder ? "", perms ? "440", owner ? "root", group ? "root", }: let
+    # If a file that is supposed to be substituted in is missing, then »placeholder« is inserted instead, the other substitutions and writing of the file continues, but the snippet returns a failure exit code.
+    writeSubstitutedFile = { path, text, substitutes, placeholder ? "", owner ? "root", group ? "root", mode ? "440", }: let
         hash = builtins.hashString "sha256" text;
         esc = lib.escapeShellArg;
-    in { "write ${path}" = if enable then ''
-        text=$(cat << '#${hash}'
-        ${text}
-        #${hash}
-        )
-        ${builtins.concatStringsSep "\n" (lib.mapAttrsToList (name: file: "text=\"\${text//${esc name}/$( if ! cat ${esc file} ; then printf %s ${esc placeholder} ; false ; fi )}\"") substitutes)}
-        install -m ${esc (toString perms)} -o ${esc (toString owner)} -g ${esc (toString group)} /dev/null ${esc path}
-        <<<"$text" cat >${esc path}
-    '' else ''rm ${esc path} || true''; };
+    in "(${''
+        text=$(cat << ${"'#${hash}'\n${text}\n#${hash}\n"})
+        placeholder=${esc placeholder}
+        failed= ; ${builtins.concatStringsSep "\n" (lib.mapAttrsToList (ref: file: ''
+            subst=$( if ! cat ${esc file} ; then printf %s "$placeholder" ; false ; fi ) || failed=1
+            text=''${text//${esc ref}/$subst}
+        '') substitutes)}
+        <<<"$text" install /dev/stdin -m ${esc (toString mode)} -o ${esc (toString owner)} -g ${esc (toString group)} ${esc path}
+        if [[ $failed ]] ; then false ; fi
+    ''})";
 
     # Wraps a (bash) script into a "package", making »deps« available on the script's path.
     wrap-script = args@{ pkgs, src, deps, ... }: let
