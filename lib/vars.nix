@@ -10,8 +10,9 @@ in rec {
     # Given a function and a list, calls the function for each list element, and returns the merge of all attr sets returned by the function
     # attrs = mapMerge (value: { "${newKey}" = newValue; }) list
     # attrs = mapMerge (key: value: { "${newKey}" = newValue; }) attrs
-    mapMerge       = toAttr: listOrAttrs: mergeAttrs       (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
-    mapMergeUnique = toAttr: listOrAttrs: mergeAttrsUnique (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
+    mapMerge          = toAttr: listOrAttrs: mergeAttrs          (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
+    mapMergeUnique    = toAttr: listOrAttrs: mergeAttrsUnique    (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
+    mapMergeRecursive = toAttr: listOrAttrs: mergeAttrsRecursive (if builtins.isAttrs listOrAttrs then lib.mapAttrsToList toAttr listOrAttrs else map toAttr listOrAttrs);
 
     # Given a list of attribute sets, returns the merged set of all contained attributes, with those in elements with higher indices taking precedence.
     mergeAttrs = attrsList: lib.foldl (a: b: a // b) { } attrsList; # (Do not (ever?) use »foldl'«!)
