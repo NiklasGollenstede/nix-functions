@@ -1,6 +1,6 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
-    inherit (nixpkgs) lib;
-in rec {
+dirname: inputs: let
+    inherit (inputs.nixpkgs) lib;
+in {
 
     ## Creates a project's »node_modules« based only on it's »package-lock.json« (and its hash), so that changes in the rest of the project don't cause a lengthy rebuild of the »node_modules« tree.
     #  Also returns a »passthru.devShell« that, upon activision, replaces the local »$PWD/node_modules« with a shallow, read-only copy of the in-store »node_modules«.
@@ -12,16 +12,19 @@ in rec {
     mk-node_modules = {
         pkgs, nodejs ? pkgs.nodejs, # Package set and nodejs version to use.
         sourceRoot ? null, # Optional. Only used in the defaults for »packageLock« and »npmDepsHash«, and for »passthru.withSource«.
+        packageJson ? builtins.path { path = "${sourceRoot}/package.json"; name = "package.json"; }, # »package.json« as individual store path (use a literal (unquoted) path or »builtins.path«).
         packageLock ? builtins.path { path = "${sourceRoot}/package-lock.json"; name = "package-lock.json"; }, # »package-lock.json« as individual store path (use a literal (unquoted) path or »builtins.path«).
         npmDepsHash ? lib.fileContents "${sourceRoot}/package-lock.hash", # Hash, as created in »package-lock.hash« by »commit-lock« after changing »package-lock.json«.
         extraArgs ? { }, # Additional/overriding arguments to pass to »pkgs.buildNpmPackage«.
         extraShellHook ? "", # Additional commands to execute at the end of the »devShell«'s »shellHook«.
         flakeOutput ? null, # Optional. Relative flake output path of this package. E.g.: »./nixos#packages.${pkgs.system}.default«.
     }: let
-        node_modules-prod = let node_modules = (pkgs.buildNpmPackage.override { inherit nodejs; }) (rec {
+        node_modules-prod = let node_modules = (pkgs.buildNpmPackage.override { inherit nodejs; }) ({
             name = "node_modules-prod"; NODE_ENV = "production";
             inherit npmDepsHash; src = pkgs.runCommandLocal "package-lock" { } ''
-                mkdir -p $out ; ln -sT ${packageLock} $out/package-lock.json
+                mkdir -p $out
+                ln -sT ${packageJson} $out/package.json
+                ln -sT ${packageLock} $out/package-lock.json
             '';
 
             # Compatibility options:

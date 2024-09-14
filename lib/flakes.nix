@@ -84,6 +84,9 @@ in rec {
             patches' = importWrapped inputs "${path}/patches";
             patches = if patches'.exists then patches'.result else if hasDir "patches" then importPatches inputs "${path}/patches" { } else { };
 
+            # Nix 2.14 starts setting this correctly for all actual inputs, but not for inputs.self
+            outPath = let check = path: assert path != "/"; if builtins.pathExists "${path}/flake.nix" then path else check (builtins.dirOf path); in check path;
+
         in (
             (if lib'.exists then { lib = lib'.result; } else { })
             // (/* if overlays == { } then { } else */ { inherit overlays; })
@@ -91,7 +94,7 @@ in rec {
             // (/* if legacyPackages == { } then { } else */ { inherit legacyPackages; })
             // (/* if nixosModules == { } then { } else */ { inherit nixosModules; })
             // (/* if patches == { } then { } else */ { inherit patches; })
-            // { outPath = path; } # Nix 2.14 starts setting this correctly for all actual inputs, but not for inputs.self
+            // { inherit outPath; }
         );
 
         result = outputs repo;
@@ -111,9 +114,9 @@ in rec {
     #     ]; # ...
     # }; in inputs.functions.lib.patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ nixosModules, overlays, lib, ... }: let ... in [ repo ... ])
     patchFlakeInputsAndImportRepo = inputs: patches: flakePath: outputs: (
-        patchFlakeInputs inputs patches (inputs: importRepo inputs flakePath (outputs (inputs // {
-            self = inputs.self // { outPath = builtins.path { path = flakePath; name = "source"; }; }; # If the »flake.nix is in a sub dir of a repo, "${inputs.self}" would otherwise refer to the parent. (?)
-        })))
+        patchFlakeInputs inputs patches (inputs: importRepo inputs flakePath (repo: outputs (inputs // {
+            self = inputs.self // { outPath = repo.outPath; }; # (This may or may not automatically get there.)
+        }) repo))
     );
 
     # Merges a list of flake output attribute sets.
