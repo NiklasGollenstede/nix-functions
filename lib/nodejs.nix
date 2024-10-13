@@ -41,7 +41,7 @@ in {
             '';
         } // extraArgs // (rec {
             passthru = {
-                inherit node_modules-dev node_modules-prod nodejs devShell;
+                inherit node_modules-dev node_modules-prod nodejs extraShellHook devShell;
                 withSource = name: commands: pkgs.runCommandLocal name { inherit passthru; } ''
                     mkdir -p $out ${lib.optionalString (sourceRoot != null) ''; cp -aT ${sourceRoot}/ $out/ ; chmod -R +w $out''}
                     ln -sT ${node_modules}/node_modules $out/node_modules
@@ -57,7 +57,7 @@ in {
         } // extraArgs;
 
         devShell = pkgs.mkShell {
-            nativeBuildInputs = [ nodejs ];
+            nativeBuildInputs = [ nodejs pkgs.bindfs ];
             passthru = node_modules-prod.passthru;
             shellHook = let
                 make-mutable = pkgs.writeShellScript "make-mutable" ''

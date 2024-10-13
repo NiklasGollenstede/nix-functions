@@ -144,7 +144,7 @@ in rec {
     } // opts // { filter = builtins.isFunction; });
 
     importScripts = inputs: dir: opts: ( # (recurse implicitly)
-        builtins.mapAttrs (name: _: importPatches inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
+        builtins.mapAttrs (name: _: importScripts inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
     ) // ( # (recurse explicitly)
         builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
         # (actual import:)
