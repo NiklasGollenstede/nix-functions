@@ -39,6 +39,7 @@
 		"pname",
 		"readarray",
 		"shopt",
+		"stdenv",
 		"sublist",
 		"tmpfiles",
 		"uidmapping",

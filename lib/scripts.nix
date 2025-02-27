@@ -99,14 +99,16 @@ in rec {
         body = builtins.split "(\n[)]?[}])[ ]*([#][^\n]*)?\n" after;
     in if (builtins.length body) < 3 then null else line + (builtins.head body) + (builtins.head (builtins.elemAt body 1));
 
+    ## Converts a (flat) attribute set of "files" (text & symlink) into a file tree.
     writeTextFiles = pkgs: name: args@{
         destination ? "", # relative path appended to $out (and cwd), e.g. "bin"
-        executable ? "",  # optional shell globs of paths to run »chmod +x« on, e.g. "bin/*"
+        executable ? "",  # optional shell globs of paths to run »chmod +x« on, e.g. "bin/* lib/foo/*.so"
         checkPhase ? "",  # syntax checks, e.g. for scripts: ''for f in "''${fileNames[@]}" ; do ${stdenv.shellDryRun} "$f" ; done''
-    ... }: files: let
-        texts = builtins.attrValues files;
-        passAsFiles = builtins.listToAttrs (builtins.genList (i: { name = "text_${toString i}"; value = builtins.elemAt texts i; }) (builtins.length texts));
-    in pkgs.runCommandLocal name (args // passAsFiles // {
+    ... }: files: let     # { ${path} = string | { text = string; } | { source = string; }; }
+        contents = builtins.attrValues files;
+        numbered = builtins.genList (i: let c = builtins.elemAt contents i; text = if builtins.isString c then c else if c?text && builtins.isString c.text then c.text else null; in rec { symlink = text == null; name = "${if symlink then "link" else "text"}_${toString i}"; value = if symlink then c.source else text; }) (builtins.length contents);
+        partitioned = builtins.partition (_:_.symlink) numbered; passAsFiles = builtins.listToAttrs partitioned.wrong; passAsVars = builtins.listToAttrs partitioned.right;
+    in pkgs.runCommandLocal name (args // passAsFiles // passAsVars // {
         fileNames = builtins.concatStringsSep "\n" (builtins.attrNames files); passAsFile = [ "fileNames" ] ++ builtins.attrNames passAsFiles;
         passthru = (args.passthru or { }) // { inherit files; };
     }) ''
@@ -116,8 +118,14 @@ in rec {
         readarray -t fileNames <$fileNamesPath
         index=0 ; for name in "''${fileNames[@]}" ; do
             mkdir -p "$( dirname "$name" )"
-            declare var=text_$(( index++ ))Path
-            mv "''${!var}" "$name"
+            declare link=link_$(( index ))
+            if [[ ''${!link:-} ]] ; then
+                ln -sT "''${!link}" "$name"
+            else
+                declare text=text_$(( index ))Path
+                mv "''${!text}" "$name"
+            fi
+            : $(( index++ ))
         done
 
         if [[ "$executable" ]]; then chmod +x -- $executable ; fi

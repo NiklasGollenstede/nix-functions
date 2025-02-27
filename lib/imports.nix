@@ -148,10 +148,11 @@ in rec {
     ) // ( # (recurse explicitly)
         builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
         # (actual import:)
-    ) // (lib.mapAttrs (name: path: ({
+    ) // (lib.mapAttrs (name: path': ({
         writeShellScriptBin, pkgs, lib, helpers ? { },
         context ? { }, preScript ? "", postScript ? "",
     }: let
+        path = builtins.path { path = path'; }; # (don't rebuild the script on every change to the repo)
         scripts = substituteImplicit { inherit helpers pkgs; scripts = [ path ]; context = {
             dirname = dir; inherit inputs pkgs lib; outputs = inputs.self;
         } // (opts.context or { }) // context; };
@@ -160,7 +161,7 @@ in rec {
             source ${bash.generic-arg-parse}
             source ${bash.generic-arg-verify}
             source ${bash.generic-arg-help}
-            ${preScript} ${"\n"} ${scripts} ${"\n"} ${postScript}
+            ${preScript}${"\n"}${scripts}${"\n"}${postScript}
         '').overrideAttrs (old: { passthru = { inherit scripts; src = path; }; })
     ))) (getFilesExt "sh(.md)?" dir));
 
