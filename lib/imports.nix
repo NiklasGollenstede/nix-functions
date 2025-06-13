@@ -1,5 +1,5 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
-    inherit (nixpkgs) lib;
+dirname: inputs@{ ...}: let
+    inherit (inputs.nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
@@ -119,7 +119,7 @@ in rec {
         self = (mergeAttrsUnique (builtins.filter (it: builtins.isAttrs it && !it?__functor) (builtins.attrValues (builtins.removeAttrs categories noSpread)))) // categories;
         inputs' = builtins.removeAttrs inputs [ "self" ];
         reexports = builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: { name = if name == "nixpkgs" || !inputs.${name}?lib then null else rename.${name} or name; value = inputs.${name}.lib; }) (builtins.attrNames inputs')));
-    in self // { __internal__ = nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
+    in self // { __internal__ = inputs.nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
 
     # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. See »importFilteredFlattened« and »isProbablyModule« for details.
     importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({

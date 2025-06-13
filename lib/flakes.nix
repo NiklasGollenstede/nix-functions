@@ -35,7 +35,7 @@ in rec {
     )) else input) inputs);
 
     # Generates implicit flake outputs by importing conventional paths in the local repo. Usage:
-    #     outputs = inputs@{ self, nixpkgs, functions, ... }: functions.lib.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ])
+    #     outputs = inputs@{ self, nixpkgs, functions, ... }: functions.lib.importRepo inputs ./. (repo@{ overlays, lib, ... }: let ... in [ repo ... ]);
     # If the `flake.nix` is in a sub dir (e.g., `nix`) of a repo and some of the (implicitly) imported files need to reference something outside that sub dir, then the path needs to passed like this: `"${../.}/nix"` (i.e, a native nix path out to the root of the repo (/what needs to be referenced) and then a string path back do the flake dir).
     importRepo = inputs: flakePath: outputs: let
         repo = (lib.makeOverridable getRepo) rec {
@@ -92,7 +92,7 @@ in rec {
             // (/* if overlays == { } then { } else */ { inherit overlays; })
             // (/* if packages == { } then { } else */ { inherit packages; })
             // (/* if legacyPackages == { } then { } else */ { inherit legacyPackages; })
-            // (/* if nixosModules == { } then { } else */ { inherit nixosModules; })
+            // (/* if nixosModules == { } then { } else */ { inherit nixosModules; }) # TODO: only modules with no _class or _class == "nixos" should be exported as »nixosModules«. Others should become »${_class}Modules«.
             // (/* if patches == { } then { } else */ { inherit patches; })
             // { inherit outPath; }
         );

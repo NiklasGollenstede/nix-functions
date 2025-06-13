@@ -1,0 +1,10 @@
+{
+	"[nix]": {
+		"editor.detectIndentation": true,
+		"editor.insertSpaces": true,
+		"editor.tabSize": 4,
+	},
+	"cSpell.diagnosticLevel": "Information", // to find spelling mistakes
+	"cSpell.words": [
+	],
+}
