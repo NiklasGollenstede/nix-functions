@@ -2,7 +2,8 @@ dirname: { self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
 in rec {
 
-    ## Data Structures
+
+    ### Data Structures
 
     ## Given a function mapping a name to its value and a list of names, generate that mapping as attribute set. (This is the same as »lib.attrsets.genAttrs« with swapped arguments.)
     namesToAttrs = toValue: names: builtins.listToAttrs (map (name: { inherit name; value = toValue name; }) names);
@@ -60,7 +61,8 @@ in rec {
         go = i: if i == len then -1 else if (builtins.elemAt list i) == elem then i else go (i + 1);
     in go 0;
 
-    ## String Manipulation
+
+    ### String Manipulation
 
     # Given a regular expression with capture groups and a list of strings, returns the flattened list of all the matched capture groups of the strings matched in their entirety by the regular expression.
     mapMatching = exp: strings: (builtins.filter (v: v != null) (builtins.concatLists (builtins.filter (v: v != null) (map (string: (builtins.match exp string)) strings))));
@@ -154,5 +156,17 @@ in rec {
         exponent = if unit == null then 0 else { K = 1; M = 2; G = 3; T = 4; P = 5; }.${unit};
         base = if (builtins.elemAt match 3) == null || (builtins.elemAt match 2) != null then 1024 else 1000;
     in if builtins.isInt decl then decl else if match != null then num * (pow base exponent) else throw "${decl} is not a number followed by a size suffix";
+
+
+    ### Functions
+
+    # Builds functions whose arguments can be overridden, similar to »lib.makeOverridable«, but instead of setting the override function as »override« on the attributes that the original function returns (and concerning itself with »overrideDerivation« and »overrideAttrs«), the override function is passed as second argument to the original function (who can then return or use it in whatever way it chooses).
+    # Example: func = withOverridable (args: override: { inherit args override; }); foo = func "foo"; bar = foo.override "bar"; assert foo.args == "foo" && bar.args == "bar";
+    withOverridable = f_args_override: let
+      keepSignature = lib.mirrorFunctionArgs f_args_override;
+    in keepSignature (origArgs: let
+        addArgs = newArgs: origArgs // (if lib.isFunction newArgs then newArgs origArgs else newArgs);
+        override = keepSignature (newArgs: withOverridable f_args_override (addArgs newArgs));
+    in f_args_override origArgs override);
 
 }

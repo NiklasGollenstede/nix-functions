@@ -35,10 +35,10 @@ Nix also defines [a schema](https://nixos.wiki/wiki/Flakes#Flake_schema) for the
 	* Applying the `.default` overlays of all (direct) inputs can be done in library functions and significantly reduces boilerplate code.
 		* Note: There are performance concerns regarding this, but first merging overlays (`composeManyExtensions`) and then passing them to `import nixpkgs` seems to be faster.
 * Packages are imported (to `pkgs` instances) via the (`.default`) overlays of input flakes.
-	* Inside a flake, wherever a (`nix`)`pkgs` instance exists (overlays, modules, ...) *do not* use other (or own) flake's `#outputs.(legacy)packages.${arch}.*`. This uses a separate nixpkgs instantiation (per dependent flake, evaluation overhead), disables further overlays to those packages, and most likely breaks any sort of cross-architecture building.
+	* Inside a flake, wherever a (`nix`)`pkgs` instance exists (overlays, modules, ...) **do not** use other (or own) flake's `#outputs.(legacy)packages.${arch}.*`. This uses a separate nixpkgs instantiation (per dependent flake, evaluation overhead), disables further overlays to those packages, and most likely breaks any sort of cross-architecture building.
 * Packages from the overlays may *additionally* be exported as `#outputs.packages.$arch`.
 	* This is meant for CLI usage (`nix shell/run/profile`) *only*.
-	* Iff the things to be exported are not derivations (e.g. they are sets of derivations), use `#outputs.legacyPackages...` instead.
+	* Iff the things to be exported are not derivations (e.g. they are sets of derivations or functions), use `#outputs.legacyPackages...` instead.
 * Any `#outputs.(nixpkgs/*)Modules` (that declares options or defines configuration) should include its file location.
 	* While the concrete value of that location is an implementation detail (see above), it is useful for debugging and it's uniqueness is required for the module system to work properly (deduplication and suppression of modules).
 	* Since a module is anything that can be imported by a module, directly exporting paths to the module files (without explicitly `import`ing them) is a valid solution to this.
@@ -49,7 +49,7 @@ Nix also defines [a schema](https://nixos.wiki/wiki/Flakes#Flake_schema) for the
 		* Note: There are thousands of module files in `nixpkgs`, most of which are imported by default. Adding a few dozens or maybe hundreds imported from other flakes shouldn't slow evaluation down too much. (`nixos-hardware` may be a reasonable exception to this import-everything-by-default.)
 
 
-### Conventions/Suggestions for Flakes' Internal Structure
+### Convention for Flakes' Internal Structure
 
 To have the functions in `functions.flakes.*` and `functions.import.*` automatically import and export things according to the rules above, the layout and code inside the repository should stick to some conventions (that also otherwise make sense for structural reasons).
 
@@ -70,8 +70,10 @@ The [`nixos-installer`](https://github.com/NiklasGollenstede/nixos-installer/) r
 [`./overlays/`](./overlays/) contains nixpkgs overlays that modify existing packages (usually from `nixpkgs`).
 Auto-generated overlays from `patches` and `pkgs` (see below) are merged with the explicit `./overlays/` (see `functions.import.importOverlays`), with the later ones overwriting earlier ones of the same name, as `overlays` output, and all these are merged as `overlays.default`.
 Additionally, any packages added or modified by any of those overlays are also exported as `packages.<arch>.*` output (see `functions.import.packagesFromOverlay`).
+Anything added/modified by overlays that is not a derivation is exported as `legacyPackages.<arch>.*`.
 
-[`./pkgs/`](./pkgs/) contains new package definitions that are automatically added via overlays of and as packages of the same name as the files path's **base** name (minus (`/default`)`.nix`(`.md`), i.e., `pkgs/foo/bar/default.nix` becomes `bar`, and `pkgs/baz.nix.md` becomes `baz`), which then implicitly create `packages.*` outputs (see above).
+[`./pkgs/`](./pkgs/) contains new package definitions and package-defining functions.
+They are automatically added via overlays of and as packages/functions of the same name as the files path's **base** name (minus (`/default`)`.nix`(`.md`), i.e., `pkgs/foo/bar/default.nix` becomes `bar`, and `pkgs/baz.nix.md` becomes `baz`), which then implicitly create `packages.*` outputs (see above).
 The package definitions are imported via `pkgs.callPackage` with empty arguments.
 
 [`./patches/`](./patches/) contains patches.

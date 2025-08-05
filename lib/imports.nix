@@ -148,7 +148,7 @@ in rec {
     ) // ( # (recurse explicitly)
         builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
         # (actual import:)
-    ) // (lib.mapAttrs (name: path': ({
+    ) // (lib.mapAttrs (name: path': ({ # (this will be called by callPackage)
         writeShellScriptBin, pkgs, lib, helpers ? { },
         context ? { }, preScript ? "", postScript ? "",
     }: let

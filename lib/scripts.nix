@@ -101,16 +101,23 @@ in rec {
 
     ## Converts a (flat) attribute set of "files" (text & symlink) into a file tree.
     writeTextFiles = pkgs: name: args@{
-        destination ? "", # relative path appended to $out (and cwd), e.g. "bin"
-        executable ? "",  # optional shell globs of paths to run »chmod +x« on, e.g. "bin/* lib/foo/*.so"
-        checkPhase ? "",  # syntax checks, e.g. for scripts: ''for f in "''${fileNames[@]}" ; do ${stdenv.shellDryRun} "$f" ; done''
-    ... }: files: let     # { ${path} = string | { text = string; } | { source = string; }; }
+        destination ? "", # Relative path appended to $out (and cwd). Example: "bin". Default: "".
+        executable ? "",  # Optional shell globs of paths to run »chmod +x« on. Example: "bin/* lib/foo/*.so". Default: all files directly in bin/.
+        checkPhase ? "",  # Shell code to check the written files, executed in `destination`. Example: ''for f in "''${fileNames[@]}" ; do ${stdenv.shellDryRun} "$f" ; done''. Default: `shellDryRun` on all files in bin/ whose text starts with `#!...(ba)?sh...` or whose source path ends in `.sh`. (TODO?: do the check in bash and always check the file contents?)
+    ... }: files: let     # { ${path} = ( string | { text = string; } | { source = string; } ); }
         contents = builtins.attrValues files;
         numbered = builtins.genList (i: let c = builtins.elemAt contents i; text = if builtins.isString c then c else if c?text && builtins.isString c.text then c.text else null; in rec { symlink = text == null; name = "${if symlink then "link" else "text"}_${toString i}"; value = if symlink then c.source else text; }) (builtins.length contents);
         partitioned = builtins.partition (_:_.symlink) numbered; passAsFiles = builtins.listToAttrs partitioned.wrong; passAsVars = builtins.listToAttrs partitioned.right;
+        ctnBin = lib.count (lib.hasPrefix "bin/") (builtins.attrNames files); hasBin = ctnBin > 0;
+        isShellScript = file: if file?source then lib.hasSuffix ".sh" "${file.source}" else (builtins.match ''^#![^${"\n"}]{1,128}[ \/](ba)?sh[${"\n"} ].*'' (file.text or file)) != null;
+        #mainProgPath = if args.passthru?mainProgram then if destination == "bin" then args.passthru.mainProgram else if destination == "" then "bin/${args.passthru.mainProgram}" else "" else "";
     in pkgs.runCommandLocal name (args // passAsFiles // passAsVars // {
         fileNames = builtins.concatStringsSep "\n" (builtins.attrNames files); passAsFile = [ "fileNames" ] ++ builtins.attrNames passAsFiles;
         passthru = (args.passthru or { }) // { inherit files; };
+        meta = if destination == "" && ctnBin == 1 then { mainProgram = lib.removePrefix "bin/" (lib.findFirst (lib.hasPrefix "bin/") null (builtins.attrNames files)); } // (args.meta or { }) else args.meta or { };
+        executable = args.executable or (if destination == "bin" then "*" else if hasBin then  "bin/*" else null);
+        #executable = args.executable or (lib.escapeShellArg mainProgPath);
+        checkPhase = args.checkPhase or (if args?executable then "" else builtins.concatStringsSep "" (lib.mapAttrsToList (name: value: if (destination == "bin" || lib.hasPrefix "bin/" name) && (isShellScript value) then "${pkgs.stdenv.shellDryRun} ${lib.escapeShellArg name}\n" else "") files));
     }) ''
         mkdir -p $out ; cd $out
         if [[ $destination ]] ; then mkdir -p "''${destination#/}" ; cd "''${destination#/}" ; fi
@@ -156,5 +163,27 @@ in rec {
     in pkgs.runCommandLocal name {
         script = src; nativeBuildInputs = [ pkgs.buildPackages.makeWrapper ];
     } ''makeWrapper $script $out/bin/${name} --prefix PATH : ${lib.makeBinPath deps}'';
+
+    # CDs the current shell to the closest parent directory that contains a marker file (path).
+    intoDirWith = marker: ''
+        while true ; do
+            if [ -e ./${marker} ] ; then break ; fi # this should be a good indicator
+            cd .. ; if [ $PWD = / ] ; then echo 'Unable to locate ${marker} in (parent of) CWD' >&2 ; exit ''${exitCodeOnError:-1} ; fi
+        done
+    '';
+    # Wraps a snippet of shell code such that it is executed with its CWD set to the closest parent directory that contains a marker file.
+    inDirWith = marker: shellCode: ''
+        ( ${intoDirWith marker} ; {
+            ${shellCode}
+        } )
+    '';
+    # CDs the current shell to the closest parent directory that contains a ».git/config« file.
+    intoRepoDir = intoDirWith ".git/config";
+    # CDs the current shell to the closest parent directory that contains a »flake.nix« file.
+    intoFlakeDir = intoDirWith "flake.nix";
+    # Wraps a snippet of shell code such that it is executed with its CWD set to the closest parent directory that contains a ».git/config« file.
+    inRepoDir = inDirWith ".git/config";
+    # Wraps a snippet of shell code such that it is executed with its CWD set to the closest parent directory that contains a »flake.nix« file.
+    inFlakeDir = inDirWith "flake.nix";
 
 }

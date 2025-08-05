@@ -128,7 +128,7 @@ in rec {
             else throw "outputs.${type}.${system} has multiple values, but not all attribute sets. Can't merge."
         )) values)
         else throw "outputs.${type} has multiple values, but not all attribute sets. Can't merge."
-    )) (map ( # It is quite reasonable that things meant for export are made »lib.makeOverridable«, but that does not mean that the »override« (of one outputs component) should be exported.
+    )) (map ( # It is quite reasonable that things meant for export are made »lib.makeOverridable«, but that does not mean that the »override« (of only one of output's components) should be exported.
         outputs: builtins.removeAttrs outputs [ "override" "overrideDerivation" ]
     ) outputList);
 
