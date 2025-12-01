@@ -49,15 +49,15 @@ in rec {
     ## Decides whether a thing is probably a NixOS configuration module or not.
     #  Probably because almost everything could be a module declaration (any attribute set or function returning one is potentially a module).
     #  Per convention, modules (at least those declared stand-alone in a file) are declared as functions taking at least the named arguments »config«, »pkgs«, and »lib«. Once entered into the module system, to remember where they came from, modules get wrapped in an attrset »{ _file = "<path>"; imports = [ <actual_module> ]; }«.
-    isProbablyModule = thing: let args = builtins.functionArgs thing; in (
-        (builtins.isFunction thing) && (builtins.isAttrs (thing args)) && (builtins.isBool (args.config or null)) && (builtins.isBool (args.lib or null)) && (builtins.isBool (args.pkgs or null))
+    isProbablyModule = thing: let args = lib.functionArgs thing; in (
+        (lib.isFunction thing) && (builtins.isAttrs (thing args)) && (builtins.isBool (args.config or null)) && (builtins.isBool (args.lib or null)) && (builtins.isBool (args.pkgs or null))
     ) || (
         (builtins.isAttrs thing) && ((builtins.attrNames thing) == [ "_file" "imports" ]) && ((builtins.isString thing._file) || (builtins.isPath thing._file)) && (builtins.isList thing.imports)
     );
 
     ## Decides whether a thing could be a NixPkgs overlay.
     #  Any function with two (usually unnamed) arguments returning an attrset could be an overlay, so that's rather vague.
-    couldBeOverlay = thing: let result1 = thing (builtins.functionArgs thing); result2 = result1 (builtins.functionArgs result1); in builtins.isFunction thing && builtins.isFunction result1 && builtins.isAttrs result2;
+    couldBeOverlay = thing: let result1 = thing (lib.functionArgs thing); result2 = result1 (lib.functionArgs result1); in lib.isFunction thing && lib.isFunction result1 && builtins.isAttrs result2;
 
     # Builds an attrset that, for each folder (containing a »default.nix«) or ».nix« or ».nix.md« file (other than »./default.nix«) in this folder, as the name of that folder or the name of the file without extension(s), exports the result of importing that file/folder.
     importAll = inputs: dir: builtins.mapAttrs (name: path: import path (if endsWith "/default.nix" path then "${dir}/${name}" else dir) inputs) (builtins.removeAttrs (getNixFiles dir) [ "default" ]);
@@ -73,7 +73,7 @@ in rec {
         # The imported nix value:
         result = import fullPath (if isImplicitDir then path else builtins.dirOf path) inputs;
         # Whether the import path points to an existing nix file that accepts the wrapping arguments:
-        exists = (isImplicitDir || (builtins.pathExists (if isExplicit then path else "${path}.nix"))) && (let imported = import fullPath; in builtins.isFunction imported && builtins.functionArgs imported == { } && builtins.isFunction (imported ""));
+        exists = (isImplicitDir || (builtins.pathExists (if isExplicit then path else "${path}.nix"))) && (let imported = import fullPath; in builtins.isFunction imported && lib.functionArgs imported == { } && lib.isFunction (imported ""));
         # Return »null« if not ».exists«:
         optional = if exists then result else null;
         # Throw if not ».exists«:
@@ -141,7 +141,7 @@ in rec {
     # Used in a »default.nix« and called with the »dir« it is in, imports all package definitions in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. Any nix file that returns a function is considered a package definition. See »importFilteredFlattened«.
     importPkgsDefs = inputs: dir: opts: importFilteredFlattened dir inputs ({
         except = [ "default" ]; default = dir: importPkgsDefs inputs dir opts;
-    } // opts // { filter = builtins.isFunction; });
+    } // opts // { filter = lib.isFunction; });
 
     importScripts = inputs: dir: opts: ( # (recurse implicitly)
         builtins.mapAttrs (name: _: importScripts inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
@@ -198,7 +198,7 @@ in rec {
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
-    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg.meta?mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; derivation = pkg; }) packages else packages);
+    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg?meta.mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; derivation = pkg; }) packages else packages);
 
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.

@@ -19,6 +19,7 @@
 		"darwin",
 		"dontNpmBuild",
 		"dotglob",
+		"evals",
 		"fetchpatch",
 		"foldl",
 		"gidmapping",

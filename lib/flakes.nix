@@ -17,6 +17,10 @@ in rec {
             patches = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         }).overrideAttrs (old: {
             outputs = [ "out" "narHash" ];
+            prePatch = (old.prePatch or "") + ''
+                echo 'Patching flake input ${name}@${input.rev or "«dirty»"} ${input.narHash or ""}'
+            '';
+
             installPhase = old.installPhase + "\n" + ''
                 ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ./ >$narHash
             '';
@@ -49,7 +53,10 @@ in rec {
         };
         getRepo = {
             inputs, path, dirs,
-            overlaysFromPkgs ? true, overlaysFromPatches ? true, applyToPackages ? pkgs: packages: packages,
+            overlaysFromPkgs ? true,
+            overlaysFromPatches ? true,
+            packagesFromOverlays ? true,
+            applyToPackages ? pkgs: packages: packages,
         }: let
             hasDir = dir: dirs.${dir} or false == true;
 
@@ -73,7 +80,7 @@ in rec {
                 merged = (lib.optionalAttrs overlaysFromPatches fromPatches) // (lib.optionalAttrs overlaysFromPkgs fromPkgs) // overlays;
             in (lib.optionalAttrs (merged != { }) { default = lib.composeManyExtensions (builtins.attrValues merged); }) // merged;
 
-            packages' = packagesFromOverlay { inherit inputs; apply = applyToPackages; };
+            packages' = if packagesFromOverlays then packagesFromOverlay { inherit inputs; apply = applyToPackages; } else { };
             packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');
             legacyPackages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages');
 

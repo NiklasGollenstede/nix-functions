@@ -22,7 +22,7 @@ in rec {
     mergeAttrsUnique = attrsList: let
         merged = mergeAttrs attrsList;
         names = builtins.concatLists (map builtins.attrNames attrsList);
-        duplicates = builtins.filter (a: (lib.count (b: a == b) names) >= 2) (builtins.attrNames merged);
+        duplicates = builtins.filter (name: (lib.count (_:_ == name) names) >= 2) (builtins.attrNames merged); # slow, but only evaluated when throwing
     in (
         if (builtins.length (builtins.attrNames merged)) == (builtins.length names) then merged
         else throw "Duplicate key(s) in attribute merge set: ${builtins.concatStringsSep ", " duplicates}"

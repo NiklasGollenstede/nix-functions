@@ -43,6 +43,7 @@ in rec {
         helpers ? { }, # Attrset of (highest priority) helper functions.
         onError ? "exit", # Bash command to run when sourcing any of the scripts failed.
         trace ? (m: v: v), # Function that gets called with the names and values as they are processed. Pass »builtins.trace« for debugging, esp. when evaluating one of the accessed values fails.
+        mapValue ? (v: v), # Function that gets called on each value (recursively) directly before is is stringified to be included in the output script.
     }: let
         parsedScripts = map (source: rec {
             text = if builtins.isAttrs source then source.text else builtins.readFile source; name = if builtins.isAttrs source then source.name else builtins.baseNameOf source;
@@ -62,16 +63,16 @@ in rec {
             in func resolved);
         in { name = decl; value = applied; }) decls);
         bash-ify = decl: applied: let
-            value = if builtins.isString (applied.outPath or null) then applied.outPath else if (
+            value = mapValue (if builtins.isString (applied.outPath or null) then applied.outPath else if (
                 (builtins.isBool applied) || (builtins.isFloat applied) || (builtins.isInt applied) || (builtins.isPath applied)
-            ) then builtins.toString applied else applied;
+            ) then builtins.toString applied else applied);
             name = trace "substituteImplicit »${decl}« =>" (builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] decl);
             toStringRecursive = value: if builtins.isString (value.outPath or null) then (
                 value.outPath
             ) else if builtins.isAttrs value then (
-                "(\n${asBashDict { mkName = name: value: if value == null then null else name; mkValue = name: toStringRecursive; } value})"
+                "(\n${asBashDict { mkName = name: value: if (mapValue value) == null then null else name; mkValue = name: value: toStringRecursive (mapValue value); } value})"
             ) else if (builtins.isList value) then (
-                "( ${lib.escapeShellArgs (map toStringRecursive value)} )"
+                "( ${lib.escapeShellArgs (map (value: toStringRecursive (mapValue value)) value)} )"
             ) else (toString value);
         in (let final = (
                  if (value == null) then "#${name}=null"

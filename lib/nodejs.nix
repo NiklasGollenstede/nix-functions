@@ -17,7 +17,7 @@ in {
         npmDepsHash ? lib.fileContents "${sourceRoot}/package-lock.hash", # Hash, as created in »package-lock.hash« by »commit-lock« after changing »package-lock.json«.
         extraArgs ? { }, # Additional/overriding arguments to pass to »pkgs.buildNpmPackage«.
         extraShellHook ? "", # Additional commands to execute at the end of the »devShell«'s »shellHook«.
-        flakeOutput ? null, # Optional. Relative flake output path of this package. E.g.: »./nixos#packages.${pkgs.system}.default«.
+        flakeOutput ? null, # Optional. Relative flake output path of this package. E.g.: »./nixos#packages.${pkgs.stdenv.hostPlatform.system}.default«.
     }: let
         node_modules-prod = let node_modules = (pkgs.buildNpmPackage.override { inherit nodejs; }) ({
             name = "node_modules-prod"; NODE_ENV = "production";
