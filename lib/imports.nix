@@ -2,6 +2,7 @@ dirname: inputs@{ ...}: let
     inherit (inputs.nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
+    inherit (import "${dirname}/vendored.nix" dirname inputs) unifyModuleSyntax;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
     bash = import "${dirname}/bash" "${dirname}/bash" inputs;
     defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
@@ -183,7 +184,7 @@ in rec {
         names = if overlays?default then getNames overlays.default else builtins.concatLists (map getNames (builtins.attrValues overlays));
     in mapMergeUnique (name: if pkgs.${name}?recurseForDerivations || lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
-    # Automatically builds a flakes »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
+    # Automatically builds a flake's »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
     packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: lib.genAttrs systems (localSystem: let
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { system = localSystem; });
         modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
@@ -198,8 +199,31 @@ in rec {
         pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
-    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in { type = "app"; program = if pkg?meta.mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}"; derivation = pkg; }) packages else packages);
+    in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in {
+        type = "app"; derivation = pkg; meta = if pkg?meta.description then { description = pkg.meta.description; } else { };
+        program = if pkg?meta.mainProgram then "${bin}/bin/${pkg.meta.mainProgram}" else "${bin}";
+    }) packages else packages);
 
+    ## Imports the module at »modulePath«, but makes its effects -- i.e., its »config« -- (and the effects of its imports) conditional on an added »mkEnableOption« at »optionPath«.
+    #  The result is an importable module. The caller may want to add the »modulePath« to »disabledModules« if it was imported before.
+    mkOptionalModule = optionPath: modulePath: ({ config, ... }: {
+        options = lib.foldr (name: opt: { ${name} = opt; }) (lib.mkEnableOption "the module ${modulePath}") optionPath;
+        imports = [ (enableModuleIf (lib.getAttrFromPath optionPath config) modulePath modulePath ("#${lib.concatStringsSep "." optionPath}")) ];
+        #disabledModules = [ modulePath ];
+    });
+    ## Recursively imports the module »spec« (which may be anything that is importable as a module), but makes any »config« declared by the modules conditional on »enable«. »path« should be the file-system location of the module; »suffix« will be appended to the wrapped modules' declared file system locations (so that they can be distinguished from the original module, for example to be targeted by »disabledModules«).
+    enableModuleIf = enable: spec: path: suffix: let
+        imported = if lib.isString spec || lib.isPath spec then import spec else spec;
+        function = if lib.isFunction imported then imported else _: imported;
+    in rec { _file = "${path}${suffix}"; imports = [ (lib.setFunctionArgs (args: let
+        attrs = unifyModuleSyntax path path (function args);
+    in attrs // {
+        config = lib.mkIf enable (attrs.config or { });
+        imports = if attrs?imports then lib.imap1 (i: spec: enableModuleIf enable spec (if lib.isString spec || lib.isPath spec then spec else "${path}:anon-${toString i}") suffix) attrs.imports else [ ];
+        _file = _file; key = _file;
+    }) (lib.functionArgs function)) ]; };
+
+    #  Deprecated: Use »mkOptionalModule« + »disabledModules« instead.
     ## Given a path to a module in »nixpkgs/nixos/modules/«, when placed in another module's »imports«, this adds an option »disableModule.${modulePath}« that defaults to being false, but when explicitly set to »true«, disables all »config« values set by the module.
     #  Every module should, but not all modules do, provide such an option themselves.
     #  This is similar to adding the path to »disabledModules«, but:

@@ -1,18 +1,25 @@
 ## Performs a basic verification of the named arguments passed by the user and parsed by »generic-arg-parse« against the names in »allowedArgs«.
-#  Entries in »allowedArgs« should have the form »[--name]="description"« for boolean flags, and »[--name=VAL]="description"« for string arguments.
+#  Entries in »allowedArgs« should have the form »[--name]="description"« for boolean flags, and »[--name=VAL]="description"« for string options.
 #  »description« is used by »generic-arg-help«. Boolean flags may only have the values »1« (as set by »generic-ags-parse« for flags without value) or be empty.
 #  »VAL« is purely nominal. Any argument passed that is not in »allowedArgs« raises an error.
 function generic-arg-verify { # 1?: exitCodeOnError
     local exitCode=${exitCodeOnError:-${exitCode:-${1:-1}}}
-    if  declare -p shortArgs &>/dev/null ; then # (dunno how to make a better test for this)
+    # ${dupOptsAre:-override} or lists or error
+
+    if declare -p shortArgs &>/dev/null ; then # (dunno how to make a better test for this)
         local spec ; for spec in "${!allowedArgs[@]}" ; do
             local names=${spec%=*} ; names=${names%[} ; if [[ $names =~ ^-([^-]),' '-- ]] ; then
-                local description=${allowedArgs[$spec]} ; unset allowedArgs[$spec]
-                allowedArgs[${spec#*, }]="$description"
+                local description=${allowedArgs[$spec]}
+                unset allowedArgs["$spec"] ; allowedArgs[${spec#*, }]="$description"
                 local shortName=${BASH_REMATCH[1]} ; local longName=${names#*, --}
                 if [[ ${shortArgs[$shortName]:-} ]] ; then
                     if [[ ${args[$longName]:-} ]] ; then
-                        echo "Short option »-$shortName« conflicts with long option »--$longName«" 1>&2 ; \return $exitCode
+                        echo "Short arg »-$shortName« conflicts with long arg »--$longName«" 1>&2 ; \return $exitCode
+                    fi
+                    if [[ $spec == *' ...' ]] ; then
+                        local -n argvLongName=argv_$longName
+                        local -n argvShortName=argv_$shortName
+                        argvLongName=( "${argvShortName[@]}" )
                     fi
                     args[$longName]=${shortArgs[$shortName]}
                     unset shortArgs[$shortName]
@@ -20,9 +27,19 @@ function generic-arg-verify { # 1?: exitCodeOnError
             fi
         done
         if (( ${#shortArgs[@]} > 0 )) ; then
-            { echo -n "Unexpected short options:" ; printf ' -%s' "${!shortArgs[@]}" ; echo ; } 1>&2 ; \return $exitCode
+            { echo -n "Unexpected short arguments:" ; printf ' -%s' "${!shortArgs[@]}" ; echo ".${allowedArgs[help]:+ Call with »--help« for a list of valid arguments.}" ; } 1>&2 ; \return $exitCode
         fi
+        unset shortArgs
     fi
+
+    for spec in "${!allowedArgs[@]}" ; do
+        if [[ $spec != *'='*' ...' ]] ; then continue ; fi
+        local name=${spec%'='*} description=${allowedArgs[$spec]}
+        unset allowedArgs["$spec"] ; allowedArgs["$name"]="$description"
+        name=${name/--/} ; if [[ ! ${args[$name]:-} ]] ; then continue ; fi
+        local -n argvName=argv_$name
+        argvName+=( "${args[$name]}" ) ; args[$name]=1
+    done
 
     local names=' '"${!allowedArgs[@]}"' '
     local name ; for name in "${!args[@]}" ; do

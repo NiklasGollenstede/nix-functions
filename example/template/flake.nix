@@ -22,7 +22,7 @@ in [ # can return a list of attrsets, which will be merged
 	repo # export the lib.* nixosModules.* overlays.* patches.* and (legacy)packages.*.* imported from this repo
 
     # But can also add custom exports:
-	{ apps = (functions.lib.exportFromPkgs { inherit inputs; what = pkgs: { # For each »inputs.systems« (or x64/aarch64-linux/darwin). Automatically uses any »inputs.*.overlays.default«.
+	{ apps = (inputs.functions.lib.exportFromPkgs { inherit inputs; what = pkgs: { # For each »inputs.systems« (or x64/aarch64-linux/darwin). Automatically uses any »inputs.*.overlays.default«.
 		format = pkgs.writeShellScriptBin "..." ''...'';
 		default = pkgs.somethingImportantThatOurOwnOverlayAdded;
 	}; asApps = true; }); } # wrap for export as apps (to be run) instead of (legacy)packages (to be installed)

@@ -30,7 +30,7 @@ in rec {
     in (
         # sourceInfo = { lastModified; lastModifiedDate; narHash; outPath; rev?; shortRev?; }
         # A non-flake has only the attrs of »sourceInfo«.
-        # A flake has »{ _type = "flake"; inputs; outputs; sourceInfo; } // outputs // sourceInfo«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. Don't know the merge priority.
+        # A flake has »outputs // sourceInfo // { _type = "flake"; inputs; outputs; sourceInfo; }«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. (See »_type = "flake"« in https://github.com/NixOS/flake-compat/blob/master/default.nix)
         # Since nix v2.14, the direct »outPath« has the relative location of the »dir« containing the »flake.nix« as suffix (if not "").
         if (!input?sourceInfo) then sourceInfo else (let
             outputs = (import "${patched.outPath}${dir}/flake.nix").outputs ({ inherit self; } // input.inputs);
