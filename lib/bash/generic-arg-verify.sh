@@ -12,12 +12,12 @@ function generic-arg-verify { # 1?: exitCodeOnError
                 local description=${allowedArgs[$spec]}
                 unset allowedArgs["$spec"] ; allowedArgs[${spec#*, }]="$description"
                 local shortName=${BASH_REMATCH[1]} ; local longName=${names#*, --}
-                if [[ ${shortArgs[$shortName]:-} ]] ; then
-                    if [[ ${args[$longName]:-} ]] ; then
-                        echo "Short arg »-$shortName« conflicts with long arg »--$longName«" 1>&2 ; \return $exitCode
+                if [[ -v shortArgs[$shortName] ]] ; then
+                    if [[ -v args[$longName] ]] ; then
+                        echo "Short arg »-$shortName« conflicts with use of long arg »--$longName«" 1>&2 ; \return $exitCode
                     fi
                     if [[ $spec == *' ...' ]] ; then
-                        local -n argvLongName=argv_$longName
+                        local -n argvLongName=argv_${longName//-/_}
                         local -n argvShortName=argv_$shortName
                         argvLongName=( "${argvShortName[@]}" )
                     fi
@@ -37,7 +37,7 @@ function generic-arg-verify { # 1?: exitCodeOnError
         local name=${spec%'='*} description=${allowedArgs[$spec]}
         unset allowedArgs["$spec"] ; allowedArgs["$name"]="$description"
         name=${name/--/} ; if [[ ! ${args[$name]:-} ]] ; then continue ; fi
-        local -n argvName=argv_$name
+        local -n argvName=argv_${name//-/_}
         argvName+=( "${args[$name]}" ) ; args[$name]=1
     done
 

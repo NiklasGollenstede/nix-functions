@@ -7,19 +7,19 @@
 #  See »generic-arg-help« and »generic-arg-verify«.
 function generic-arg-parse { # ...
     declare -p args &>/dev/null || declare -g -A args=( ) ; declare -p argv &>/dev/null || declare -g -a argv=( ) # this ends up in the caller's scope
-    if [[ ${shortArgsAre:-} == flags || ${shortArgsAre:-} == options ]] ; then declare -g -A shortArgs=( ) ; fi
+    if [[ ${shortArgsAre:-} == flags || ${shortArgsAre:-} == FlAgS || ${shortArgsAre:-} == options ]] ; then declare -g -A shortArgs=( ) ; fi
     if [[ ${shortOptsAre:-} ]] ; then echo "The »shortOptsAre« was renamed to »shortArgsAre«." 1>&2 ; \return 1 ; fi
     # ${dupOptsAre:-override} or lists or error
     while (( "$#" )) ; do
         if [[ $1 == -- ]] ; then shift ; argv+=( "$@" ) ; \return 0 ; fi
         if [[ $1 == --* ]] ; then
             if [[ $1 == *=* ]] ; then
-                local name=${1%=*} ; name=${name#--} ; local value=${1#--$name=}
+                local name=${1%%=*} ; name=${name#--} ; local value=${1#--$name=}
                 if [[ ${args[$name]:-} ]] ; then
                     if [[ ${dupOptsAre:-} == error ]] ; then
                         echo "Duplicate argument: --$name" >&2 ; \return ${exitCodeOnError:-1}
                     elif [[ ${dupOptsAre:-} == lists ]] ; then
-                        local -n argvName=argv_$name
+                        local -n argvName=argv_${name//-/_}
                         argvName+=( "${args[$name]}" ) # save previous
                     fi # else override by default
                 fi
@@ -32,11 +32,13 @@ function generic-arg-parse { # ...
                 fi
             fi
         elif [[ $1 == -* ]] ; then
-            if [[ ${shortArgsAre:-} == flags ]] ; then
+            if [[ ${shortArgsAre:-} == flags || ${shortArgsAre:-} == FlAgS ]] ; then
                 if (( "${#1}" > 2 )) ; then
                     echo "Short flags must be single letters: $1" >&2 ; \return ${exitCodeOnError:-1}
                 fi
-                shortArgs[${1#-}]=1
+                local name=${1#-} value=1
+                if [[ ${shortArgsAre:-} == FlAgS && $name != ${name,,} ]] ; then name=${name,,} ; value='' ; fi
+                shortArgs[$name]=$value
             elif [[ ${shortArgsAre:-} == options ]] ; then
                 if (( "${#1}" > 2 )) ; then
                     echo "Short options must be single letters: $1" >&2 ; \return ${exitCodeOnError:-1}

@@ -127,7 +127,7 @@ in rec {
     );
 
     # Merges a list of flake output attribute sets.
-    mergeFlakeOutputs = outputList: builtins.zipAttrsWith (type: values: (
+    mergeFlakeOutputs = outputsList: builtins.zipAttrsWith (type: values: (
         if ((builtins.length values) == 1) then (builtins.head values)
         else if (builtins.all builtins.isAttrs values) then (builtins.zipAttrsWith (system: values: (
             if ((builtins.length values) == 1) then (builtins.head values)
@@ -137,6 +137,6 @@ in rec {
         else throw "outputs.${type} has multiple values, but not all attribute sets. Can't merge."
     )) (map ( # It is quite reasonable that things meant for export are made »lib.makeOverridable«, but that does not mean that the »override« (of only one of output's components) should be exported.
         outputs: builtins.removeAttrs outputs [ "override" "overrideDerivation" ]
-    ) outputList);
+    ) outputsList);
 
 }

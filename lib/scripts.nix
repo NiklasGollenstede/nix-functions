@@ -158,6 +158,52 @@ in rec {
         if [[ $failed ]] ; then false ; fi
     ''})";
 
+
+    # `nix print-dev-env $drv`, as a normal derivation producing a sourceable script, instead of a function baked into nix.
+    # Compared to `nix print-dev-env $drv`, this does not:
+    # * rewrite the output paths to point to ./outputs/* (instead of /nix/store/*)
+    # * save the structured-attrs files NIX_ATTRS_SH_FILE and NIX_ATTRS_JSON_FILE
+    print-dev-env = pkg: let
+        # these were taken from: <nix>/src/nix/develop.cc
+        ignoreVars = [ "BASHOPTS" "HOME" "NIX_BUILD_TOP" "NIX_ENFORCE_PURITY" "NIX_LOG_FD" "NIX_REMOTE" "PPID" "SHELLOPTS" "SSL_CERT_FILE" "TEMP" "TEMPDIR" "TERM" "TMP" "TMPDIR" "TZ" "UID" ];
+        savedVars = [ "PATH" "XDG_DATA_DIRS" ];
+    in pkg.overrideAttrs {
+        builder = pkg.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
+        args = [ "-c" ''{
+            if [ -e "$NIX_ATTRS_SH_FILE" ]; then source "$NIX_ATTRS_SH_FILE"; fi
+            export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
+            if [[ -n $stdenv ]]; then source "$stdenv"/setup ; fi
+
+            echo 'unset shellHook'
+            ${lib.concatStrings (map (var: ''
+                echo '${var}=''${${var}:-} ; nix_saved_${var}="''$${var}"'
+            '') savedVars)}
+            declare -p | while read line ; do
+                # from <nix>/src/nix/get-env.sh:
+                if ! [[ $line =~ ^declare\ (-[^ ])\ ([^=]*) ]] ; then continue ; fi
+                type=''${BASH_REMATCH[1]} ; name=''${BASH_REMATCH[2]}
+                if [[ ' -x -- -a -A ' != *' '$type' '* ]] ; then continue; fi
+                if [[ $name =~ ^BASH_ || $name =~ ^COMP_ || ' _ DIRSTACK EUID FUNCNAME HISTCMD HOSTNAME GROUPS PIPESTATUS PWD RANDOM SHLVL SECONDS EPOCHREALTIME EPOCHSECONDS ' == *' '$name' '* ]] ; then continue; fi
+                # end from <nix>/src/nix/get-env.sh
+                if [[ ' ${lib.concatStringsSep " " ignoreVars} BASH HOSTTYPE IFS LINENO MACHTYPE OLDPWD OPTERR OSTYPE PS4 SHELL ' == *' '$name' '* ]] ; then continue; fi
+                printf '%s\n' "$line"
+            done
+            declare -F | while read line ; do
+                if ! [[ $line =~ ^declare\ -f\ ([^ ]+) ]] ; then continue ; fi
+                declare -f "''${BASH_REMATCH[1]}"
+            done
+            ${lib.concatStrings (map (var: ''
+                echo '${var}="''$${var}''${nix_saved_${var}:+:$nix_saved_${var}}"'
+            '') savedVars)}
+            echo 'export NIX_BUILD_TOP="$( mktemp -d -t nix-shell.XXXXXX )"'
+            ${lib.concatStrings (map (var: ''
+                echo 'export ${var}="$NIX_BUILD_TOP"'
+            '') [ "TMP" "TMPDIR" "TEMP" "TEMPDIR" ])}
+            echo 'eval "''${shellHook:-}"'
+        } >$out'' ];
+    };
+
+
     # Wraps a (bash) script into a "package", making »deps« available on the script's path.
     wrap-script = args@{ pkgs, src, deps, ... }: let
         name = args.name or (builtins.baseNameOf (builtins.unsafeDiscardStringContext "${src}"));
