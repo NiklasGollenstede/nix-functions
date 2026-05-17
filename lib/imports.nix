@@ -268,4 +268,37 @@ in rec {
         ];
     };
 
+    ## Create a package that is pinned to a different version than the one currently supplied by nixpkgs.
+    #  For simple packages or minor version changes, it is usually sufficient to modify a `base` package by setting the `version` and `overrideSrc`.
+    #  For more complex changes, one may want to fetch a different packaging expression with `path` or `url` (and `sha256`).
+    #  Unless `downgrade` is set, this tries to compare `base` and `version` and returns `base` if it is already newer.
+    pinPackage = params@{
+        pkgs ? throw "The `pkgs` argument to `pinPackage` is required when using `path` or `url`.",
+        # Optionally pass an existing variant of the package as `base`:
+        base ? throw "The `base` argument to `pinPackage` is required when not using `path` or `url`.",
+        # Optionally specify a nix package definition to (fetch and) import (instead of using »base«):
+        url ? "https://raw.githubusercontent.com/NixOS/nixpkgs/${path}", # explicit url to a nix file (the target file can not reference other files via relative paths)
+        path ? null, # or a path, as suffix wo the default `url`, or within `nixpkgs`, if that is specified
+        nixpkgs ? null, # either a string interpreted as commit hash, or something path-y
+        sha256 ? null, # when fetching `path`/`url` or `nixpkgs`, its content hash
+        args ? { }, # optional arguments to `callPackage`
+        # Optionally specify a version to set on the new package. Unless `downgrade` is set, return `base` if provided and its version is already newer than this version:
+        version ? new.version, downgrade ? false,
+        # Optionally replace the source of the new package (takes old and returns new source) and pass the new package through a finalizer function:
+        overrideSrc ? null, finalize ? pkg: pkg,
+
+        new ? (let
+            l1 = if params?url || (params?path && ! params?nixpkgs) then (
+                pkgs.callPackage (builtins.fetchurl { inherit url sha256; }) args
+            ) else if params?path then if params?sha256 && builtins.isString nixpkgs then (
+                pkgs.callPackage (fetchTarball { name = "source"; inherit sha256; url = "https://github.com/nixos/nixpkgs/archive/${nixpkgs}.tar.gz"; }) args
+            ) else (
+                pkgs.callPackage "${nixpkgs}/${path}" args
+            ) else base;
+            l2 = if params?version then l1.overrideAttrs (old: { version = version; __intentionallyOverridingVersion = true; }) else l1;
+            l3 = if params?overrideSrc then l2.overrideAttrs (old: { src = overrideSrc old.src; }) else l2;
+        in finalize l3),
+
+    }: if downgrade then new else if params?base && lib.versionOlder version base.version then base else new;
+
 }

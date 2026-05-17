@@ -119,7 +119,7 @@ in rec {
         executable = args.executable or (if destination == "bin" then "*" else if hasBin then  "bin/*" else null);
         #executable = args.executable or (lib.escapeShellArg mainProgPath);
         checkPhase = args.checkPhase or (if args?executable then "" else builtins.concatStringsSep "" (lib.mapAttrsToList (name: value: if (destination == "bin" || lib.hasPrefix "bin/" name) && (isShellScript value) then "${pkgs.stdenv.shellDryRun} ${lib.escapeShellArg name}\n" else "") files));
-    }) ''
+    }) '' # bash
         mkdir -p $out ; cd $out
         if [[ $destination ]] ; then mkdir -p "''${destination#/}" ; cd "''${destination#/}" ; fi
 
@@ -169,7 +169,8 @@ in rec {
         savedVars = [ "PATH" "XDG_DATA_DIRS" ];
     in pkg.overrideAttrs {
         builder = pkg.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
-        args = [ "-c" ''{
+        args = [ "-c" '' # bash
+            exec >$out # redirect stdout
             if [ -e "$NIX_ATTRS_SH_FILE" ]; then source "$NIX_ATTRS_SH_FILE"; fi
             export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
             if [[ -n $stdenv ]]; then source "$stdenv"/setup ; fi
@@ -177,7 +178,7 @@ in rec {
             echo 'unset shellHook'
             ${lib.concatStrings (map (var: ''
                 echo '${var}=''${${var}:-} ; nix_saved_${var}="''$${var}"'
-            '') savedVars)}
+            '') savedVars)} # bash
             declare -p | while read line ; do
                 # from <nix>/src/nix/get-env.sh:
                 if ! [[ $line =~ ^declare\ (-[^ ])\ ([^=]*) ]] ; then continue ; fi
@@ -200,7 +201,7 @@ in rec {
                 echo 'export ${var}="$NIX_BUILD_TOP"'
             '') [ "TMP" "TMPDIR" "TEMP" "TEMPDIR" ])}
             echo 'eval "''${shellHook:-}"'
-        } >$out'' ];
+        '' ];
     };
 
 

@@ -8,7 +8,7 @@ function generic-arg-verify { # 1?: exitCodeOnError
 
     if declare -p shortArgs &>/dev/null ; then # (dunno how to make a better test for this)
         local spec ; for spec in "${!allowedArgs[@]}" ; do
-            local names=${spec%=*} ; names=${names%[} ; if [[ $names =~ ^-([^-]),' '-- ]] ; then
+            local names=${spec%%=*} ; names=${names%%[} ; if [[ $names =~ ^-([^-]),' '-- ]] ; then
                 local description=${allowedArgs[$spec]}
                 unset allowedArgs["$spec"] ; allowedArgs[${spec#*, }]="$description"
                 local shortName=${BASH_REMATCH[1]} ; local longName=${names#*, --}
@@ -34,7 +34,7 @@ function generic-arg-verify { # 1?: exitCodeOnError
 
     for spec in "${!allowedArgs[@]}" ; do
         if [[ $spec != *'='*' ...' ]] ; then continue ; fi
-        local name=${spec%'='*} description=${allowedArgs[$spec]}
+        local name=${spec%%'='*} description=${allowedArgs[$spec]}
         unset allowedArgs["$spec"] ; allowedArgs["$name"]="$description"
         name=${name/--/} ; if [[ ! ${args[$name]:-} ]] ; then continue ; fi
         local -n argvName=argv_${name//-/_}

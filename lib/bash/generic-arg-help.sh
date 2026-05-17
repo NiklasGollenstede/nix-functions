@@ -11,7 +11,7 @@ function generic-arg-help { # 1: name, 2?: args, 3?: description, 4?: suffix, 5?
     local pos name ; while IFS=' ' read -u3 -r pos spec ; do
         printf '    %s\n        %s\n' "$spec" "${allowedArgs[$spec]//$'\n'/$'\n        '}"
     done 3< <( for spec in "${!allowedArgs[@]}" ; do
-        names=${spec%=*} ; if [[ $names == *' '* ]] ; then
+        names=${spec%%=*} ; if [[ $names == *' '* ]] ; then
             printf '%s %s\n' "${names##* }" "$spec"
         else printf '%s %s\n' "$names" "$spec" ; fi
     done | LC_ALL=C ${sortBinPath:-sort} )
