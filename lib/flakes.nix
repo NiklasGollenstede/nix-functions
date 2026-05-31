@@ -1,7 +1,7 @@
 dirname: inputs@{ self, nixpkgs, ...}: let
     inherit (nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mergeAttrsUnique flipNames;
-    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped importModules importOverlays importPkgsDefs importPatches packagesFromOverlay;
+    inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped importModules importOverlays importPkgsDefs importPatches packagesFromOverlay exportFromPkgs;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
 in rec {
 
@@ -13,7 +13,9 @@ in rec {
         inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patched = (applyPatches {
-            name = "${name}-patched"; src = "${input.sourceInfo or input}";
+            #name = "source"; # calling this "source" is worse in every way, except it may fix the lengthy re-copying when pinned patched inputs are used later: https://github.com/NixOS/nix/issues/7075
+            name = "${name}-patched"; # but that did not actually help
+            src = "${input.sourceInfo or input}";
             patches = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         }).overrideAttrs (old: {
             outputs = [ "out" "narHash" ];
@@ -53,10 +55,11 @@ in rec {
         };
         getRepo = {
             inputs, path, dirs,
-            overlaysFromPkgs ? true,
-            overlaysFromPatches ? true,
-            packagesFromOverlays ? true,
+            overlaysFromPkgs ? true, # Whether to create overlays adding the imported package definitions.
+            overlaysFromPatches ? true, # Whether to create overlays applying the im-/exported patches to their original packages.
+            packagesFromOverlays ? true, # Whether to export everything modified by the oen overlays as (»legacy«)»packages«.
             applyToPackages ? pkgs: packages: packages,
+            defaultPackage ? null, # Name of a package to export as »default«.
         }: let
             hasDir = dir: dirs.${dir} or false == true;
 
@@ -80,7 +83,7 @@ in rec {
                 merged = (lib.optionalAttrs overlaysFromPatches fromPatches) // (lib.optionalAttrs overlaysFromPkgs fromPkgs) // overlays;
             in (lib.optionalAttrs (merged != { }) { default = lib.composeManyExtensions (builtins.attrValues merged); }) // merged;
 
-            packages' = if packagesFromOverlays then packagesFromOverlay { inherit inputs; apply = applyToPackages; } else { };
+            packages' = if packagesFromOverlays then packagesFromOverlay { inherit inputs; apply = applyToPackages; default = defaultPackage; } else if defaultPackage != null then exportFromPkgs { inherit inputs; what = [ ]; default = defaultPackage; } else { };
             packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');
             legacyPackages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages');
 

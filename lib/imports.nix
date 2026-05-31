@@ -5,7 +5,7 @@ dirname: inputs@{ ...}: let
     inherit (import "${dirname}/vendored.nix" dirname inputs) unifyModuleSyntax;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
     bash = import "${dirname}/bash" "${dirname}/bash" inputs;
-    defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" "x86_64-darwin" ];
+    defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ]; # 26.05 deprecated x86_64-darwin
 in rec {
 
     # Builds an attrset that, for each file with extension »ext« in »dir«, maps the the base name of that file, to its full path.
@@ -191,7 +191,7 @@ in rec {
         compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
         withExtras = (builtins.removeAttrs compatiblePackages exclude)
         // (if lib.isList extra then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) extra) else extra pkgs)
-        // (if default != null then { default = default pkgs; } else { });
+        // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in apply pkgs withExtras);
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.

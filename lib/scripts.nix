@@ -221,7 +221,7 @@ in rec {
     '';
     # Wraps a snippet of shell code such that it is executed with its CWD set to the closest parent directory that contains a marker file.
     inDirWith = marker: shellCode: ''
-        ( ${intoDirWith marker} ; {
+        ( ${intoDirWith marker} {
             ${shellCode}
         } )
     '';
