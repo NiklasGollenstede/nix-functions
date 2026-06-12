@@ -1,5 +1,5 @@
-dirname: { self, nixpkgs, ...}: let
-    inherit (nixpkgs) lib;
+dirname: inputs: let
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
 in rec {
 
 

@@ -1,5 +1,5 @@
 dirname: inputs: let
-    inherit (inputs.nixpkgs) lib;
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
 in {
 
     ## Creates a project's »node_modules« based only on it's »package-lock.json« (and its hash), so that changes in the rest of the project don't cause a lengthy rebuild of the »node_modules« tree.

@@ -1,5 +1,5 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
-    inherit (nixpkgs) lib;
+dirname: inputs: let
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) extractLineAnchored;
     inherit (import "${dirname}/misc.nix" dirname inputs) ifNull;
 in rec {
@@ -37,7 +37,7 @@ in rec {
     # * »bash-ify«: function with arguments »decl« and »value« that creates a bash variable declaration (with value assignment),
     # * »scripts«: the processed scripts sourced by main script returned.
     substituteImplicit = lib.makeOverridable (args@{
-        scripts, # List of paths to scripts to process and then source in the returned script. Each script may also be an attrset »{ name; text; }« instead of a path.
+        scripts, # List of scripts to process and then source in the returned script. Each script may be an attrset »{ name; text; }« or as a path that is expanded via »builtins.baseNameOf« and »builtins.readFile«. Each script must have a unique »name« (either explicitly of the path's basename).
         context, # The root attrset for the resolution of substitutions.
         pkgs, # Instantiated »nixpkgs«, as fallback location for helpers, and to grab »writeScript« etc from.
         helpers ? { }, # Attrset of (highest priority) helper functions.
@@ -46,7 +46,8 @@ in rec {
         mapValue ? (v: v), # Function that gets called on each value (recursively) directly before is is stringified to be included in the output script.
     }: let
         parsedScripts = map (source: rec {
-            text = if builtins.isAttrs source then source.text else builtins.readFile source; name = if builtins.isAttrs source then source.name else builtins.baseNameOf source;
+            text = if builtins.isAttrs source then source.text else builtins.readFile source;
+            name = if builtins.isAttrs source then source.name else builtins.baseNameOf source;
             parsed = builtins.split ''@\{([#!]?)([a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9](![a-zA-Z][a-zA-Z0-9_.-]*[a-zA-Z0-9])?)([:*@\[#%/^,\}])'' text; # (first part of a bash parameter expansion, with »@« instead of »$«)
             processed = builtins.concatStringsSep "" (map (seg: if builtins.isString seg then seg else (
                 "$"+"{"+(builtins.head seg)+(builtins.replaceStrings [ "." "!" "-" ] [ "_" "1" "0" ] (builtins.elemAt seg 1))+(toString (builtins.elemAt seg 3))
@@ -59,7 +60,7 @@ in rec {
             resolved = lib.attrByPath path null context;
             applied = if call == null || resolved == null then resolved else (let
                 split = builtins.filter builtins.isString (builtins.split "[.]" call); name = builtins.head split; args = builtins.tail split;
-                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or inputs.self.lib.${name} or (pkgs.lib or nixpkgs.lib).${name} or pkgs.${name} or builtins.${name}) args;
+                func = builtins.foldl' (func: arg: func arg) (helpers.${name} or inputs.self.lib.${name} or (pkgs.lib or inputs.nixpkgs.lib).${name} or pkgs.${name} or builtins.${name}) args;
             in func resolved);
         in { name = decl; value = applied; }) decls);
         bash-ify = decl: applied: let
@@ -81,15 +82,32 @@ in rec {
             else if (builtins.isAttrs value) then "declare -A ${name}=${toStringRecursive value}"
             else throw "Can't use value of unsupported type ${builtins.typeOf} as substitution for ${decl}" # builtins.isFunction
         ); in trace final final);
-        scriptsDir = writeTextFiles pkgs "scripts" { executable = "*"; } (
+        scriptsDir = writeTextFiles pkgs "scripts" { executable = "*"; } scriptFiles;
+        scriptFiles = (
             (builtins.listToAttrs (map (script: { name = builtins.unsafeDiscardStringContext script.name; value = script.processed; }) parsedScripts)
         ) // {
             __vars__ = builtins.concatStringsSep "\n" (lib.mapAttrsToList (bash-ify) vars);
+            __main__ = builtins.concatStringsSep "\n" ([ "source ${placeholder "out"}/__vars__ || ${onError}" ] ++ (map (script: "source ${placeholder "out"}/${script.name} || ${onError}") parsedScripts));
         });
-        script = builtins.concatStringsSep "\n" ([ "source ${scriptsDir}/__vars__ || ${onError}" ] ++ (map (script: "source ${scriptsDir}/${script.name} || ${onError}") parsedScripts));
+        script = "source ${scriptsDir}/__main__ || ${onError}";
+        #script = builtins.concatStringsSep "\n" ([ "source ${scriptsDir}/__vars__ || ${onError}" ] ++ (map (script: "source ${scriptsDir}/${script.name} || ${onError}") parsedScripts));
     in {
-        __toString = _: script; inherit script decls vars bash-ify scriptsDir;
-        scripts = map (name: "${scriptsDir}/${name}") (builtins.attrNames scriptsDir.files);
+        # A Bash snippet that can be included in a script file to execute the transformed input scripts.
+        inherit script;
+        # For backwards compatibility.
+        __toString = _: script;
+        # List of each requested lookup path, as found in the input scripts.
+        inherit decls;
+        # Attribute set mapping each decl to its resolved value.
+        inherit vars;
+        # Function that turns a decl and its resolved value into a bash variable declaration.
+        inherit bash-ify;
+        # Text contents of the processed scripts, as attr set of their »name«s. »__vars__« contains the generated variable declarations, and »__main__« contains a snippet that imports the rest in the correct order.
+        inherit scriptFiles;
+        # The processed scripts written to a single output directory.
+        inherit scriptsDir;
+        # List of all produced files. Sorted.
+        scripts = [ "${scriptsDir}/__vars__" ] ++ (map ({ name, ... }: "${scriptsDir}/${name}") parsedScripts) ++ [ "${scriptsDir}/__main__" ];
     });
 
     ## Given a bash »script« as string and a function »name«, this finds and extracts the definition of that function in and from the script.

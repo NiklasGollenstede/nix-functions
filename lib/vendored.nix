@@ -1,5 +1,5 @@
-dirname: inputs@{ ...}: let
-    inherit (inputs.nixpkgs) lib;
+dirname: inputs: let
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
     inherit (lib) throwIfNot isAttrs mkMerge removeAttrs attrNames head;
 in {
 

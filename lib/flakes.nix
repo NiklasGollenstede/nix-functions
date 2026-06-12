@@ -1,5 +1,5 @@
-dirname: inputs@{ self, nixpkgs, ...}: let
-    inherit (nixpkgs) lib;
+dirname: inputs: let
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
     inherit (import "${dirname}/vars.nix"    dirname inputs) namesToAttrs mergeAttrsUnique flipNames;
     inherit (import "${dirname}/imports.nix" dirname inputs) importWrapped importModules importOverlays importPkgsDefs importPatches packagesFromOverlay exportFromPkgs;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
@@ -12,31 +12,32 @@ in rec {
     patchFlakeInputs = inputs: patches: outputs: let
         inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
+        patches' = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         patched = (applyPatches {
             #name = "source"; # calling this "source" is worse in every way, except it may fix the lengthy re-copying when pinned patched inputs are used later: https://github.com/NixOS/nix/issues/7075
             name = "${name}-patched"; # but that did not actually help
-            src = "${input.sourceInfo or input}";
-            patches = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
+            src = "${input.sourceInfo or input}"; patches = patches';
         }).overrideAttrs (old: {
             outputs = [ "out" "narHash" ];
             prePatch = (old.prePatch or "") + ''
                 echo 'Patching flake input ${name}@${input.rev or "«dirty»"} ${input.narHash or ""}'
             '';
-
             installPhase = old.installPhase + "\n" + ''
                 ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ./ >$narHash
             '';
         });
         sourceInfo = (builtins.removeAttrs (input.sourceInfo or input) [ "narHash" ]) // { inherit (patched) outPath; narHash = lib.fileContents patched.narHash; }; # (keeps (short)rev, which is not really correct, but nixpkgs' rev is used in NixOS generation names)
+        extraSourceInfo = { unpatched = input; patches = patches'; }; # include these in the explicit sourceInfo only
         dir = if input?sourceInfo.outPath && lib.hasPrefix input.sourceInfo.outPath input.outPath then lib.removePrefix input.sourceInfo.outPath input.outPath else ""; # this should work starting with nix version 2.14 (before, they are the same path)
     in (
         # sourceInfo = { lastModified; lastModifiedDate; narHash; outPath; rev?; shortRev?; }
         # A non-flake has only the attrs of »sourceInfo«.
         # A flake has »outputs // sourceInfo // { _type = "flake"; inputs; outputs; sourceInfo; }«, where »inputs« is what's passed to the outputs function without »self«, and »outputs« is the result of calling the outputs function. (See »_type = "flake"« in https://github.com/NixOS/flake-compat/blob/master/default.nix)
         # Since nix v2.14, the direct »outPath« has the relative location of the »dir« containing the »flake.nix« as suffix (if not "").
-        if (!input?sourceInfo) then sourceInfo else (let
+        if (!input?sourceInfo) then extraSourceInfo // sourceInfo else (let
             outputs = (import "${patched.outPath}${dir}/flake.nix").outputs ({ inherit self; } // input.inputs);
-            self = outputs // sourceInfo // { _type = "flake"; outPath = "${patched.outPath}${dir}"; inherit (input) inputs; inherit outputs; inherit sourceInfo; };
+            self = (builtins.mapAttrs (name: _: outputs.${name}) input) # this ensures that the attr names are known without importing, and thus without actually patching
+            // sourceInfo // { _type = "flake"; outPath = "${patched.outPath}${dir}"; inherit (input) inputs; inherit outputs; sourceInfo = extraSourceInfo // sourceInfo; };
         in self)
     )) else input) inputs);
 
@@ -120,7 +121,8 @@ in rec {
     # outputs = inputs: let patches = {
     #     nixpkgs = [
     #         # remote: { url = "https://github.com/NixOS/nixpkgs/pull/###.diff"; sha256 = inputs.nixpkgs.lib.fakeSha256; }
-    #         # local: ./overlays/patches/nixpkgs-###.patch # (use long native path to having the path change if any of the other files in ./. change)
+    #         # import: inputs.foo.patches.nixpkgs.bar
+    #         # local: ./overlays/patches/nixpkgs/baz.patch # (use a direct native path to avoid having the path change if any of the other files in ./. change)
     #     ]; # ...
     # }; in inputs.functions.lib.patchFlakeInputsAndImportRepo inputs patches ./. (inputs@{ self, nixpkgs, ... }: repo@{ nixosModules, overlays, lib, ... }: let ... in [ repo ... ])
     patchFlakeInputsAndImportRepo = inputs: patches: flakePath: outputs: (

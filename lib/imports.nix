@@ -1,5 +1,5 @@
 dirname: inputs@{ ...}: let
-    inherit (inputs.nixpkgs) lib;
+    inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
     inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     inherit (import "${dirname}/vendored.nix" dirname inputs) unifyModuleSyntax;
@@ -49,9 +49,9 @@ in rec {
 
     ## Decides whether a thing is probably a NixOS configuration module or not.
     #  Probably because almost everything could be a module declaration (any attribute set or function returning one is potentially a module).
-    #  Per convention, modules (at least those declared stand-alone in a file) are declared as functions taking at least the named arguments »config«, »pkgs«, and »lib«. Once entered into the module system, to remember where they came from, modules get wrapped in an attrset »{ _file = "<path>"; imports = [ <actual_module> ]; }«.
+    #  Per convention, modules (at least those declared stand-alone in a file) are declared as functions taking at least the named arguments »config« and »pkgs«. Once entered into the module system, to remember where they came from, modules get wrapped in an attrset »{ _file = "<path>"; imports = [ <actual_module> ]; }«.
     isProbablyModule = thing: let args = lib.functionArgs thing; in (
-        (lib.isFunction thing) && (builtins.isAttrs (thing args)) && (builtins.isBool (args.config or null)) && (builtins.isBool (args.lib or null)) && (builtins.isBool (args.pkgs or null))
+        (lib.isFunction thing) && (builtins.isAttrs (thing args)) && (builtins.isBool (args.config or null)) && (builtins.isBool (args.pkgs or null))
     ) || (
         (builtins.isAttrs thing) && ((builtins.attrNames thing) == [ "_file" "imports" ]) && ((builtins.isString thing._file) || (builtins.isPath thing._file)) && (builtins.isList thing.imports)
     );
@@ -115,12 +115,14 @@ in rec {
     # Each nix file/dir in »lib/« (not listed in »except«) will be imported and added as »lib.${name}« (w/o extension). Additionally, if the imported value is an attribute set and »name« is not in »noSpread«, then the values attributes will be added directly to lib.
     # Internally, the calling flake can use »lib = inputs.self.lib.__internal__«, which is »inputs.nixpkgs.lib« (i.e, the nix standard library), with the ».lib« output of all »inputs« (including the own lib as »self«) added.
     # By passing e.g. »rename.too-long = "foo"«, inputs.too-long.lib« will (internally) become »lib.foo«.
-    importLib = inputs: dir: { except ? [ ], noSpread ? [ ], rename ? { }, ... }: let
+    importLib = inputs: dir: { except ? [ ], noSpread ? [ ], rename ? { }, preferUnpatched ? false, ... }: let
         categories = builtins.removeAttrs (importAll inputs dir) except;
         self = (mergeAttrsUnique (builtins.filter (it: builtins.isAttrs it && !it?__functor) (builtins.attrValues (builtins.removeAttrs categories noSpread)))) // categories;
-        inputs' = builtins.removeAttrs inputs [ "self" ];
-        reexports = builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: { name = if name == "nixpkgs" || !inputs.${name}?lib then null else rename.${name} or name; value = inputs.${name}.lib; }) (builtins.attrNames inputs')));
-    in self // { __internal__ = inputs.nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
+        inputs' = builtins.removeAttrs inputs [ "self" "nixpkgs" "nixpkgs-lib" ]; # self would be recursive; nixpkgs(-lib) would be redundant, and asking wether it has a lib may unnecessarily force patches to be applied
+        reexports = builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: { name = if !inputs.${name}?lib then null else rename.${name} or name; value = inputs.${name}.lib; }) (builtins.attrNames inputs')));
+        # If »inputs.nixpkgs(-lib)« is patched, import its unpatched version. This has the advantages that dependent flakes that import this flake's lib do not need to realize the patched nixpkgs of this flake. »inputs.nixpkgs.lib« should not require patches.
+        nixpkgs' = inputs.nixpkgs-lib or inputs.nixpkgs; nixpkgs = if preferUnpatched then nixpkgs' else nixpkgs'.sourceInfo.unpatched or nixpkgs';
+    in self // { __internal__ = nixpkgs.lib // reexports // { ${rename.self or "self"} = self; }; };
 
     # Used in a »default.nix« and called with the »dir« it is in, imports all modules in that directory as an attribute set. Importing automatically recurses into directories without explicit »default.nix«. See »importFilteredFlattened« and »isProbablyModule« for details.
     importModules = inputs: dir: opts: importFilteredFlattened dir inputs ({
@@ -186,7 +188,7 @@ in rec {
 
     # Automatically builds a flake's »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
     packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { system = localSystem; });
+        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { inherit localSystem; });
         modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
         compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
         withExtras = (builtins.removeAttrs compatiblePackages exclude)
@@ -196,7 +198,7 @@ in rec {
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
     exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { system = localSystem; });
+        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { inherit localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in {
