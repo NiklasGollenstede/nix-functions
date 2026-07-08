@@ -1,6 +1,6 @@
 dirname: inputs@{ ...}: let
     inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith;
+    inherit (import "${dirname}/vars.nix" dirname inputs) mapMerge mapMergeUnique mergeAttrsUnique mergeAttrsRecursive endsWith onlyExtraArgs;
     inherit (import "${dirname}/scripts.nix" dirname inputs) substituteImplicit;
     inherit (import "${dirname}/vendored.nix" dirname inputs) unifyModuleSyntax;
     #inherit (import "${dirname}/misc.nix" dirname inputs) trace;
@@ -8,12 +8,12 @@ dirname: inputs@{ ...}: let
     defaultSystems = [ "aarch64-linux" "aarch64-darwin" "x86_64-linux" ]; # 26.05 deprecated x86_64-darwin
 in rec {
 
-    # Builds an attrset that, for each file with extension »ext« in »dir«, maps the the base name of that file, to its full path.
-    getFilesExt = ext: dir: builtins.removeAttrs (builtins.listToAttrs (map (name: let
+    # Builds an attrset that, for each file (regular or other) with extension »ext« in »dir«, maps the the base name of that file, to its full path.
+    getFilesExt = ext: dir: builtins.listToAttrs (builtins.filter (_:_.name != null) (map (name: let
         match = builtins.match ''^(.*)[.]${builtins.replaceStrings [ "." ] [ "[.]" ] ext}$'' name;
-    in if (match != null) then {
-        name = builtins.head match; value = "${dir}/${name}";
-    } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
+    in {
+        name = if match == null then null else builtins.head match; value = "${dir}/${name}";
+    }) (builtins.attrNames (builtins.readDir dir))));
 
     # Builds an attrset that, for each folder that contains a »default.nix«, and for each ».nix« or ».nix.md« file, in »dir«, maps the the name of that folder, or the name of the file without extension(s), to its full path.
     getNixFiles = dir: mapMergeUnique (name: type: if (type == "directory") then (
@@ -41,11 +41,8 @@ in rec {
     in list "" dir;
 
     # Returns an attrset where the values are the paths to all ».patch« files in this directory, and the names the respective »basename -s .patch«s.
-    getPatchFiles = dir: builtins.removeAttrs (builtins.listToAttrs (map (name: let
-        match = builtins.match ''^(.*)[.]patch$'' name;
-    in if (match != null) then {
-        name = builtins.head match; value = builtins.path { path = "${dir}/${name}"; inherit name; }; # »builtins.path« puts the file in a separate, content-addressed store path, ensuring it's path only changes when the content changes, thus avoiding unnecessary rebuilds.
-    } else { name = ""; value = null; }) (builtins.attrNames (builtins.readDir dir)))) [ "" ];
+    getPatchFiles = dir: builtins.mapAttrs (name: path: builtins.path { inherit path; name = "${name}.patch"; }) (getFilesExt "patch" dir);
+    # »builtins.path« puts the file in a separate, content-addressed store path, ensuring it's path only changes when the content changes, thus avoiding unnecessary rebuilds.
 
     ## Decides whether a thing is probably a NixOS configuration module or not.
     #  Probably because almost everything could be a module declaration (any attribute set or function returning one is potentially a module).
@@ -188,7 +185,7 @@ in rec {
 
     # Automatically builds a flake's »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
     packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "overlays" "default" "extra" "exclude" ]) // { inherit localSystem; });
+        pkgs = importPkgs inputs ((onlyExtraArgs packagesFromOverlay args) // { inherit localSystem; });
         modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
         compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
         withExtras = (builtins.removeAttrs compatiblePackages exclude)
@@ -198,7 +195,7 @@ in rec {
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
     exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((builtins.removeAttrs args [ "inputs" "systems" "default" "what" ]) // { inherit localSystem; });
+        pkgs = importPkgs inputs ((onlyExtraArgs exportFromPkgs args) // { inherit localSystem; });
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in {

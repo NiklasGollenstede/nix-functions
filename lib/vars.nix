@@ -169,4 +169,8 @@ in rec {
         override = keepSignature (newArgs: withOverridable f_args_override (addArgs newArgs));
     in f_args_override origArgs override);
 
+    ## Extract the subset of »args« passed to a »function« that it did not declare explicitly, for example to pass them through to some other function:
+    #  myFunc = { a, b, ... }@args: otherFunc (onlyExtraArgs myFunc args) // { c = a + b; };
+    onlyExtraArgs = function: args: builtins.removeAttrs args (lib.attrNames (lib.functionArgs function));
+
 }

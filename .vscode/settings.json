@@ -62,6 +62,7 @@
 		"shopt",
 		"sourceable",
 		"stdenv",
+		"stty",
 		"sublist",
 		"TMPDIR",
 		"tmpfiles",

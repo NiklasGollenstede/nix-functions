@@ -6,8 +6,8 @@
 #  The parsing is generic in so far as that it does not depend on a declaration of allowed args; checking the validity of the parsed arguments is up to the caller.
 #  See »generic-arg-help« and »generic-arg-verify«.
 function generic-arg-parse { # ...
-    declare -p args &>/dev/null || declare -g -A args=( ) ; declare -p argv &>/dev/null || declare -g -a argv=( ) # this ends up in the caller's scope
-    if [[ ${shortArgsAre:-} == flags || ${shortArgsAre:-} == FlAgS || ${shortArgsAre:-} == options ]] ; then declare -g -A shortArgs=( ) ; fi
+    declare -p args &>/dev/null || declare -g -A args=( ) ; declare -p argv &>/dev/null || declare -g -a argv=( ) ; declare -p argsOrder &>/dev/null || declare -g -a argsOrder=( ) # these end up in the caller's scope
+    if [[ ${shortArgsAre:-} == flags || ${shortArgsAre:-} == FlAgS || ${shortArgsAre:-} == options ]] ; then declare -g -A shortArgs ; fi
     if [[ ${shortOptsAre:-} ]] ; then echo "The »shortOptsAre« was renamed to »shortArgsAre«." 1>&2 ; \return 1 ; fi
     # ${dupOptsAre:-override} or lists or error
     while (( "$#" )) ; do
@@ -15,7 +15,7 @@ function generic-arg-parse { # ...
         if [[ $1 == --* ]] ; then
             if [[ $1 == *=* ]] ; then
                 local name=${1%%=*} ; name=${name#--} ; local value=${1#--$name=}
-                if [[ ${args[$name]:-} ]] ; then
+                if [[ -v args[$name] ]] ; then
                     if [[ ${dupOptsAre:-} == error ]] ; then
                         echo "Duplicate argument: --$name" >&2 ; \return ${exitCodeOnError:-1}
                     elif [[ ${dupOptsAre:-} == lists ]] ; then
@@ -23,12 +23,12 @@ function generic-arg-parse { # ...
                         argvName+=( "${args[$name]}" ) # save previous
                     fi # else override by default
                 fi
-                args[$name]=$value
+                args[$name]=$value ; argsOrder+=( "$name" )
             else
                 if [[ $1 == --no-* ]] ; then
-                    args[${1#--no-}]=''
+                    args[${1#--no-}]='' ; argsOrder+=( "${1#--no-}" )
                 else
-                    args[${1#--}]=1
+                    args[${1#--}]=1 ; argsOrder+=( "${1#--}" )
                 fi
             fi
         elif [[ $1 == -* ]] ; then
@@ -38,7 +38,7 @@ function generic-arg-parse { # ...
                 fi
                 local name=${1#-} value=1
                 if [[ ${shortArgsAre:-} == FlAgS && $name != ${name,,} ]] ; then name=${name,,} ; value='' ; fi
-                shortArgs[$name]=$value
+                shortArgs[$name]=$value ; argsOrder+=( "$name" )
             elif [[ ${shortArgsAre:-} == options ]] ; then
                 if (( "${#1}" > 2 )) ; then
                     echo "Short options must be single letters: $1" >&2 ; \return ${exitCodeOnError:-1}
@@ -47,7 +47,7 @@ function generic-arg-parse { # ...
                     echo "Missing value for short option: $1" >&2 ; \return ${exitCodeOnError:-1}
                 fi
                 local name=${1#-} ; shift ; local value=$1
-                if [[ ${shortArgs[$name]:-} ]] ; then
+                if [[ -v shortArgs[$name] ]] ; then
                     if [[ ${dupOptsAre:-} == error ]] ; then
                         echo "Duplicate argument: -$name" >&2 ; \return ${exitCodeOnError:-1}
                     elif [[ ${dupOptsAre:-} == lists ]] ; then
@@ -55,10 +55,13 @@ function generic-arg-parse { # ...
                         argvName+=( "${shortArgs[$name]}" ) # save previous
                     fi # else override by default
                 fi
-                shortArgs[$name]=$value
+                shortArgs[$name]=$value ; argsOrder+=( "$name" )
             elif [[ ${shortArgsAre:-} == error ]] ; then
                 echo "Unexpected short option: $1" >&2 ; \return ${exitCodeOnError:-1}
             else argv+=( "$1" ) ; fi
-        else argv+=( "$1" ) ; fi
+        else
+            argv+=( "$1" )
+            argsOrder+=( '' )
+        fi
     shift ; done
 }

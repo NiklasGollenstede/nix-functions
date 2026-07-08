@@ -197,7 +197,7 @@ in rec {
             ${lib.concatStrings (map (var: ''
                 echo '${var}=''${${var}:-} ; nix_saved_${var}="''$${var}"'
             '') savedVars)} # bash
-            declare -p | while read line ; do
+            declare -p | while IFS="" read -r line ; do
                 # from <nix>/src/nix/get-env.sh:
                 if ! [[ $line =~ ^declare\ (-[^ ])\ ([^=]*) ]] ; then continue ; fi
                 type=''${BASH_REMATCH[1]} ; name=''${BASH_REMATCH[2]}
@@ -207,7 +207,7 @@ in rec {
                 if [[ ' ${lib.concatStringsSep " " ignoreVars} BASH HOSTTYPE IFS LINENO MACHTYPE OLDPWD OPTERR OSTYPE PS4 SHELL ' == *' '$name' '* ]] ; then continue; fi
                 printf '%s\n' "$line"
             done
-            declare -F | while read line ; do
+            declare -F | while IFS="" read -r line ; do
                 if ! [[ $line =~ ^declare\ -f\ ([^ ]+) ]] ; then continue ; fi
                 declare -f "''${BASH_REMATCH[1]}"
             done
