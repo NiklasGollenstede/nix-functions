@@ -188,8 +188,8 @@ in rec {
     in pkg.overrideAttrs {
         builder = pkg.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
         args = [ "-c" '' # bash
-            exec >$out # redirect stdout
-            if [ -e "$NIX_ATTRS_SH_FILE" ]; then source "$NIX_ATTRS_SH_FILE"; fi
+            exec >>$out # redirect stdout
+            if [[ -e "$NIX_ATTRS_SH_FILE" ]]; then source "$NIX_ATTRS_SH_FILE"; fi
             export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
             if [[ -n $stdenv ]]; then source "$stdenv"/setup ; fi
 

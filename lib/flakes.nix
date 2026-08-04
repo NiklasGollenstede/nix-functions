@@ -72,17 +72,21 @@ in rec {
                 overlays = if overlays'.exists then overlays'.result else if hasDir "overlays" then importOverlays inputs "${path}/overlays" { } else { };
                 pkgsDefs' = importWrapped inputs "${path}/pkgs";
                 pkgsDefs = if pkgsDefs'.exists then pkgsDefs'.result else if hasDir "pkgs" then importPkgsDefs inputs "${path}/pkgs" { merge = "splice"; } else { };
-                fromPkgs = builtins.mapAttrs (name: def: (final: prev: {
+                fromPkgs = builtins.mapAttrs (name: def: ({ __functor = _: final: prev: {
                     ${name} = final.callPackage def { };
-                })) pkgsDefs;
-                fromPatches = builtins.mapAttrs (names: patches: (final: prev: let
+                }; inherit name; package = def; })) pkgsDefs;
+                patches' = lib.filterAttrs (_: it: it != { }) (lib.mapAttrs (_: lib.filterAttrs (_: lib.isStringLike)) (lib.filterAttrs (_: it: builtins.isAttrs it && it != { } && !(lib.isDerivation it)) patches));
+                fromPatches = builtins.mapAttrs (names: patches: (let
                     rename = match != null; match = builtins.match "(.+)[+](.+)" names;
                     prevName = if !rename then names else builtins.head match; aftName = if !rename then names else "${builtins.head match}-${builtins.elemAt match 1}";
-                in {
+                in { __functor = _: final: prev: {
                     ${aftName} = if prev?${prevName}.overrideAttrs then prev.${prevName}.overrideAttrs (old: (lib.optionalAttrs rename { pname = aftName; }) // { patches = (old.patches or [ ]) ++ builtins.attrValues patches; }) else null;
-                })) (lib.filterAttrs (_: it: builtins.isAttrs it && !(lib.isDerivation it)) patches); # //patches/*/ -> attrs
+                }; name = aftName; inherit patches; })) patches';
                 merged = (lib.optionalAttrs overlaysFromPatches fromPatches) // (lib.optionalAttrs overlaysFromPkgs fromPkgs) // overlays;
-            in (lib.optionalAttrs (merged != { }) { default = lib.composeManyExtensions (builtins.attrValues merged); }) // merged;
+            in (lib.optionalAttrs (merged != { }) { default = {
+                __functor = _: lib.composeManyExtensions (builtins.attrValues merged);
+                overlays = merged;
+            }; }) // merged;
 
             packages' = if packagesFromOverlays then packagesFromOverlay { inherit inputs; apply = applyToPackages; default = defaultPackage; } else if defaultPackage != null then exportFromPkgs { inherit inputs; what = [ ]; default = defaultPackage; } else { };
             packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');

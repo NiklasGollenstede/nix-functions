@@ -148,22 +148,25 @@ in rec {
     ) // ( # (recurse explicitly)
         builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
         # (actual import:)
-    ) // (lib.mapAttrs (name: path': ({ # (this will be called by callPackage and is thus the target of .override)
-        writeShellScriptBin, pkgs, lib, helpers ? { },
-        context ? { }, preScript ? "", postScript ? "",
-    }: let
-        path = builtins.path { path = path'; }; # (don't rebuild the script on every change to the repo)
-        scripts = substituteImplicit { inherit helpers pkgs; scripts = [ path ]; context = {
-            dirname = dir; inherit inputs pkgs lib; outputs = inputs.self;
-        } // (opts.context or { }) // context; };
-    in (
-        (writeShellScriptBin name ''
-            source ${bash.generic-arg-parse}
-            source ${bash.generic-arg-verify}
-            source ${bash.generic-arg-help}
-            ${preScript}${"\n"}${scripts}${"\n"}${postScript}
-        '').overrideAttrs (old: { passthru = { inherit scripts; src = path; }; })
-    ))) (getFilesExt "sh(.md)?" dir));
+    ) // (lib.mapAttrs (name: path': ({
+        __functor = _: { # (this will be called by callPackage and is thus the target of .override)
+            writeShellScriptBin, pkgs, lib, helpers ? { },
+            context ? { }, preScript ? "", postScript ? "",
+        }: let
+            path = builtins.path { path = path'; }; # (don't rebuild the script on every change to the repo)
+            scripts = substituteImplicit { inherit helpers pkgs; scripts = [ path ]; context = {
+                dirname = dir; inherit inputs pkgs lib; outputs = inputs.self;
+            } // (opts.context or { }) // context; };
+        in (
+            (writeShellScriptBin name ''
+                source ${bash.generic-arg-parse}
+                source ${bash.generic-arg-verify}
+                source ${bash.generic-arg-help}
+                ${preScript}${"\n"}${scripts}${"\n"}${postScript}
+            '').overrideAttrs (old: { passthru = { inherit scripts; src = path; }; })
+        );
+        inherit name; script = path';
+    })) (getFilesExt "sh(.md)?" dir));
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({

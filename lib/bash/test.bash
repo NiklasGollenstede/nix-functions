@@ -24,7 +24,7 @@ function run-test { inputArgs=( "$@" ) ; (
     shortArgsAre=$shortArgsAre generic-arg-help "binaryName" "argvDesc" "$summary" "$details" || exit
     PATH= exitCodeOnError=2 dupEmptyResets=1 generic-arg-verify || exit
 
-    for var in args argv argv_dup_e argv_dup_f ; do
+    for var in args argv argv_dup_s argv_dup_e argv_dup_f ; do
         varAsExpected $var || exit
     done
 ) }
@@ -41,6 +41,7 @@ function declareAllowedArgs {
         [$( $printShortFlag '-b, ' )--flag-b]="Description of flag-b"
         [$( $printShortOpt  '-c, ' )--opt-c=]="Description of opt-c with value"
         [$( $printShortOpt  '-d, ' )--opt-d=VAL]="Description of opt-d with value"
+        [$( $printShortOpt  '-s, ' )--dup-s=VAL ...]="Description of dup-s that could be repeated."
         [$( $printShortOpt  '-e, ' )--dup-e=VAL ...]="Description of dup-e that can be repeated."$'\n'"With a second line of description."
         [$( $printShortOpt  '-f, ' )--dup-f=VAL ...]="Description of dup-f that can be repeated. This description is long enough to be wrapped and indented when printed. Hopefully, if this is enough text, it will be wrapped and indented properly. "
     )
@@ -50,24 +51,26 @@ declare -A expected_args=(
     [flag-b]=1
     [opt-c]=bar
     [opt-d]=baz
+    [dup-s]=1
     [dup-e]=1
     [dup-f]=1
 )
 declare -a expected_argv=( pos1 pos2 )
+declare -a expected_argv_dup_s=( once )
 declare -a expected_argv_dup_e=( 1 2 5 )
 declare -a expected_argv_dup_f=( [2]=3 [3]=4 [4]=6 ) # 0 and 1 unset
 
 printShortFlag='echo -nE' ; printShortOpt=:
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
-run-test       -a          -B pos1       -b          -A --opt-c=foo --dup-e=1 --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
-run-test --flag-a --no-flag-b pos1       -b          -A --opt-c=foo --dup-e=1 --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
-run-test       -a          -B pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
+run-test       -a          -B pos1       -b          -A --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
+run-test --flag-a --no-flag-b pos1       -b          -A --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
+run-test       -a          -B pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
 printShortFlag=: ; printShortOpt='echo -nE'
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo      -e 1      -e 2      -f x      -f ''      -f 3      -f 4      -c bar pos2      -d baz      -e 5      -f 6 || failed
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo      -e 1      -e 2      -f x --dup-f='' --dup-f=3      -f 4      -c bar pos2      -d baz      -e 5      -f 6 || failed
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo --dup-e=1      -e 2 --dup-f=x      -f '' --dup-f=3      -f 4 --opt-c=bar pos2      -d baz --dup-e=5      -f 6 || failed
-run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-e=2      -f x      -f '' --dup-f=3 --dup-f=4      -c bar pos2 --opt-d=baz      -e 5 --dup-f=6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2 --dup-f=x --dup-f='' --dup-f=3 --dup-f=4 --opt-c=bar pos2 --opt-d=baz --dup-e=5 --dup-f=6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo      -e 1      -s once      -e 2      -f x      -f ''      -f 3      -f 4      -c bar pos2      -d baz      -e 5      -f 6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo      -e 1 --dup-s=once      -e 2      -f x --dup-f='' --dup-f=3      -f 4      -c bar pos2      -d baz      -e 5      -f 6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a      -c foo --dup-e=1      -s once      -e 2 --dup-f=x      -f '' --dup-f=3      -f 4 --opt-c=bar pos2      -d baz --dup-e=5      -f 6 || failed
+run-test --flag-a --no-flag-b pos1 --flag-b --no-flag-a --opt-c=foo --dup-e=1 --dup-s=once --dup-e=2      -f x      -f '' --dup-f=3 --dup-f=4      -c bar pos2 --opt-d=baz      -e 5 --dup-f=6 || failed
 { ! run-test --undeclared ; } || failed
 
 summary='this should be about one line of text. Maybe even two, printed exactly as passed, but not more than that. It should be printed before the usage line.'

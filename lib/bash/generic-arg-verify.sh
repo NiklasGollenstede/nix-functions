@@ -52,7 +52,7 @@ function generic-arg-verify { # 1?: exitCodeOnError
                     if [[ $hadDupe ]] ; then unset argvLongName[$i] ; fi # but leave indices as they are
                 done
             fi
-            if [[ ${!argvLongName[@]} > 0 ]] ; then args[$longName]=1 ; else args[$longName]= ; fi
+            if [[ ${!argvLongName[@]} ]] ; then args[$longName]=1 ; else args[$longName]= ; fi
         fi
     done
 

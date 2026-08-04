@@ -14,7 +14,7 @@ function generic-arg-help { # 1?: progName, 2?: args, 3?: summary, 4?: details, 
     local progName=${1:-$0} args=${2:-} summary=${3:-} details=${4:-}
     local usageLineFmt="${5:-Usage:\n    %s [OPTION[=value]]... [--] %s\n\nWhere »OPTION« may be any of:\n\n}"
     local columns= ; if [[ -t 1 ]] && type -t fmt &>/dev/null ; then
-        [[ ${COLUMNS:-} =~ ^[0-9]+$ ]] && columns=$COLUMNS || columns=$( stty --file=/dev/stdout size ) &>/dev/null || columns=$( tput cols ) &>/dev/null || true ; columns=${columns##* }
+        [[ ${COLUMNS:-} =~ ^[0-9]+$ ]] && columns=$COLUMNS || columns=$( stty --file=/proc/self/fd/3 size 3>&2 2>/dev/null ) || columns=$( tput cols 2>/dev/null ) || true ; columns=${columns##* }
     fi
     [[ ! $summary ]] || echo "$summary" # no fmt
     printf "$usageLineFmt" "$progName" "$args"
