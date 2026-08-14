@@ -10,23 +10,24 @@ in rec {
 
     # Sooner or later this should be implemented in nix itself, for now require »inputs.nixpkgs« and a system that can run »x86_64-linux« (native or through qemu).
     patchFlakeInputs = inputs: patches: outputs: let
-        inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix;
+        inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix runCommand;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patches' = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
-        patched = (applyPatches {
-            #name = "source"; # calling this "source" is worse in every way, except it may fix the lengthy re-copying when pinned patched inputs are used later: https://github.com/NixOS/nix/issues/7075
-            name = "${name}-patched"; # but that did not actually help
+        patched = (applyPatches { # Do not include anything other than »name«, »input«(».sourceInfo«)(».outPath«), and »patches« in the derivation, to avoid unnecessary rebuilds.
+            name = "${name}-patched";
             src = "${input.sourceInfo or input}"; patches = patches';
-        }).overrideAttrs (old: {
+        })/* .overrideAttrs (old: {
             outputs = [ "out" "narHash" ];
-            prePatch = (old.prePatch or "") + ''
-                echo 'Patching flake input ${name}@${input.rev or "«dirty»"} ${input.narHash or ""}'
-            '';
             installPhase = old.installPhase + "\n" + ''
                 ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ./ >$narHash
             '';
-        });
-        sourceInfo = (builtins.removeAttrs (input.sourceInfo or input) [ "narHash" ]) // { inherit (patched) outPath; narHash = lib.fileContents patched.narHash; }; # (keeps (short)rev, which is not really correct, but nixpkgs' rev is used in NixOS generation names)
+        }) */;
+        #narHash = lib.fileContents patched.narHash;
+        # This should be faster when the narHash is not actually accessed (also the build is surprisingly fast even when evaluated):
+        narHash = lib.fileContents (runCommand "${name}-patched-narHash" { } ''
+            ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ${patched.outPath} >$out
+        '');
+        sourceInfo = (input.sourceInfo or input) // { inherit (patched) outPath; inherit narHash; }; # (keeps (short)rev, which is not really correct, but nixpkgs' rev is used in NixOS generation names)
         extraSourceInfo = { unpatched = input; patches = patches'; }; # include these in the explicit sourceInfo only
         dir = if input?sourceInfo.outPath && lib.hasPrefix input.sourceInfo.outPath input.outPath then lib.removePrefix input.sourceInfo.outPath input.outPath else ""; # this should work starting with nix version 2.14 (before, they are the same path)
     in (
