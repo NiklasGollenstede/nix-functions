@@ -146,10 +146,12 @@ in rec {
 
     ## Math
 
-    pow = (let pow = b: e: if e == 1 then b else if e == 0 then 1 else b * pow b (e - 1); in pow); # (how is this not an operator or builtin?)
+    pow = (let pow = b: e: if e == 1 then b else if e == 0 then 1 else b * (pow b (e - 1)); in pow); # (how is this not an operator or builtin?)
 
     toBinString = int: builtins.concatStringsSep "" (map builtins.toString (lib.toBaseDigits 2 int));
 
+    ## Converts a data size string to the corresponding number of  bytes.
+    # The input must be or start with a number, optionally followed by a size suffix (K, M, G, T, P), optionally followed by "i" (for binary) and/or "B" (for bytes). If only a size suffix is given, binary/i is implied.
     parseSizeSuffix = decl: let
         match = builtins.match ''^([0-9]+)(K|M|G|T|P)?(i)?(B)?$'' decl;
         num = lib.toInt (builtins.head match); unit = builtins.elemAt match 1;

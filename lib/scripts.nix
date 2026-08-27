@@ -185,12 +185,16 @@ in rec {
         # these were taken from: <nix>/src/nix/develop.cc
         ignoreVars = [ "BASHOPTS" "HOME" "NIX_BUILD_TOP" "NIX_ENFORCE_PURITY" "NIX_LOG_FD" "NIX_REMOTE" "PPID" "SHELLOPTS" "SSL_CERT_FILE" "TEMP" "TEMPDIR" "TERM" "TMP" "TMPDIR" "TZ" "UID" ];
         savedVars = [ "PATH" "XDG_DATA_DIRS" ];
-    in pkg.overrideAttrs {
+    in pkg.overrideAttrs (old: {
         builder = pkg.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
+        #outputs = [ "out" ]; # we are only writing to this one, so the others may not be declared as far as Nix is concerned
+        # Setting `outputs` via `overrideAttrs` does not affect the actual derivation, and `overrideDerivation` is not transparent (the result lacks `.overrideAttrs`). So instead just `touch` all outputs. Except that `outputs` is not the whole truth, as `separateDebugInfo` adds a `debug` output. `drvAttrs.outputs` is probably what we want. But chat is not in the `old` attr set. So we use `pkg.drvAttrs.outputs`, but that certainly does not update when overwritten. What. A. Mess.
         args = [ "-c" '' # bash
+            ${lib.concatMapStringsSep "\n" (output: ": >>${"$"}${output} || exit") (pkg.drvAttrs.outputs)}
             exec >>$out # redirect stdout
             if [[ -e "$NIX_ATTRS_SH_FILE" ]]; then source "$NIX_ATTRS_SH_FILE"; fi
             export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
+            #outputs='${lib.concatStringsSep " " (old.outputs or [ "out" ])}'
             if [[ -n $stdenv ]]; then source "$stdenv"/setup ; fi
 
             echo 'unset shellHook'
@@ -220,7 +224,7 @@ in rec {
             '') [ "TMP" "TMPDIR" "TEMP" "TEMPDIR" ])}
             echo 'eval "''${shellHook:-}"'
         '' ];
-    };
+    });
 
 
     # Wraps a (bash) script into a "package", making »deps« available on the script's path.
