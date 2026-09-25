@@ -187,8 +187,10 @@ in rec {
     in mapMergeUnique (name: if pkgs.${name}?recurseForDerivations || lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
 
     # Automatically builds a flake's »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
-    packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((onlyExtraArgs packagesFromOverlay args) // { inherit localSystem; });
+    packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: let
+        systems' = if lib.isAttrs systems then systems else lib.genAttrs systems  (localSystem: { inherit localSystem; });
+    in lib.flip lib.mapAttrs systems' (localSystem: systemArgs: let
+        pkgs = importPkgs inputs ((onlyExtraArgs packagesFromOverlay args) // systemArgs);
         modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
         compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
         withExtras = (builtins.removeAttrs compatiblePackages exclude)
@@ -197,8 +199,10 @@ in rec {
     in apply pkgs withExtras);
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
-    exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: lib.genAttrs systems (localSystem: let
-        pkgs = importPkgs inputs ((onlyExtraArgs exportFromPkgs args) // { inherit localSystem; });
+    exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: let
+        systems' = if lib.isAttrs systems then systems else lib.genAttrs systems  (localSystem: { inherit localSystem; });
+    in lib.flip lib.mapAttrs systems' (localSystem: systemArgs: let
+        pkgs = importPkgs inputs ((onlyExtraArgs exportFromPkgs args) // systemArgs);
         packages = (if builtins.isList what then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) what) else what pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in if asApps then builtins.mapAttrs (_: pkg: let bin = pkg.bin or pkg.out or pkg; in {

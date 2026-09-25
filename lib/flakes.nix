@@ -10,7 +10,7 @@ in rec {
 
     # Sooner or later this should be implemented in nix itself, for now require »inputs.nixpkgs« and a system that can run »x86_64-linux« (native or through qemu).
     patchFlakeInputs = inputs: patches: outputs: let
-        inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix runCommand;
+        inherit ((import inputs.nixpkgs { overlays = [ ]; config = { }; system = builtins.currentSystem or inputs."@system" or "x86_64-linux"; }).pkgs) applyPatches fetchpatch nix runCommand;
     in outputs (builtins.mapAttrs (name: input: if name != "self" && patches?${name} && patches.${name} != [ ] then (let
         patches' = map (patch: if patch ? url then fetchpatch patch else patch) patches.${name};
         patched = (applyPatches { # Do not include anything other than »name«, »input«(».sourceInfo«)(».outPath«), and »patches« in the derivation, to avoid unnecessary rebuilds.
@@ -23,7 +23,7 @@ in rec {
             '';
         }) */;
         #narHash = lib.fileContents patched.narHash;
-        # This should be faster when the narHash is not actually accessed (also the build is surprisingly fast even when evaluated):
+        # This should be faster (and will not require nix) when the narHash is not actually accessed (also the build is surprisingly fast even when evaluated):
         narHash = lib.fileContents (runCommand "${name}-patched-narHash" { } ''
             ${lib.getExe nix} --extra-experimental-features nix-command --offline hash path ${patched.outPath} >$out
         '');
