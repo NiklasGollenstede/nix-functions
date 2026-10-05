@@ -3,7 +3,7 @@ dirname: inputs: let
 in {
 
     ## Creates a project's »node_modules« based only on it's »package-lock.json« (and its hash), so that changes in the rest of the project don't cause a lengthy rebuild of the »node_modules« tree.
-    #  Also returns a »passthru.devShell« that, upon activision, replaces the local »$PWD/node_modules« with a shallow, read-only copy of the in-store »node_modules«.
+    #  Also returns a »passthru.devShell« that, upon activation, replaces the local »$PWD/node_modules« with a shallow, read-only copy of the in-store »node_modules«.
     #  By calling »./node_modules/make-mutable«, this made writable, using a combination of FUSE overlays -- near instantaneously, without copying anything.
     #  Normal »npm« commands can then update the writable tree, which should result in changes to the »package-lock.json«.
     #  After calling »./node_modules/make-immutable« (or »umount ./node_modules«, if the link to the script was removed by npm), which discards the changes to the local »node_modules«, the changes to the »package-lock.json« can be committed to »package-lock.hash« by calling »./node_modules/commit-lock«.

@@ -59,7 +59,8 @@ in rec {
             inputs, path, dirs,
             overlaysFromPkgs ? true, # Whether to create overlays adding the imported package definitions.
             overlaysFromPatches ? true, # Whether to create overlays applying the im-/exported patches to their original packages.
-            packagesFromOverlays ? true, # Whether to export everything modified by the oen overlays as (»legacy«)»packages«.
+            packagesFromOverlays ? true, # Whether to export platform-compatible packages touched by the overlays as »packages«, and attr sets with »recurseForDerivations« as »legacyPackages«.
+            legacyPackagesUnfiltered ? true, # With »packagesFromOverlays«, whether to export everything as »legacyPackages«.
             applyToPackages ? pkgs: packages: packages,
             defaultPackage ? null, # Name of a package to export as »default«.
         }: let
@@ -89,9 +90,19 @@ in rec {
                 overlays = merged;
             }; }) // merged;
 
-            packages' = if packagesFromOverlays then packagesFromOverlay { inherit inputs; apply = applyToPackages; default = defaultPackage; } else if defaultPackage != null then exportFromPkgs { inherit inputs; what = [ ]; default = defaultPackage; } else { };
+            packages' = if packagesFromOverlays then packagesFromOverlay {
+                inherit inputs; apply = applyToPackages; default = defaultPackage;
+                recurseForDerivations = !legacyPackagesUnfiltered;
+            } else if defaultPackage != null then exportFromPkgs {
+                inherit inputs; default = defaultPackage;
+            } else { };
             packages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: lib.isDerivation)) packages');
-            legacyPackages = lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages');
+            legacyPackages = if !legacyPackagesUnfiltered then
+                lib.filterAttrs (__: _:_ != { }) (builtins.mapAttrs (_: lib.filterAttrs (_: pkg: !(lib.isDerivation pkg))) packages')
+            else packagesFromOverlay {
+                inherit inputs; apply = applyToPackages;
+                onlyPackages = false; onlyCompatible = false; recurseForDerivations = true;
+            };
 
             modules' = importWrapped inputs "${path}/modules";
             modules = if modules'.exists then modules'.result else if hasDir "modules" then importModules inputs "${path}/modules" { } else { };

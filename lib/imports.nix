@@ -181,25 +181,45 @@ in rec {
 
     # Given a list of »overlays« and »pkgs« with them applied, returns the subset (of derivations and things that contain derivations) of »pkgs« that was directly modified (returned) by the overlays.
     # (But this only works for top-level / non-scoped packages.)
-    getModifiedPackages = pkgs: overlays: let
+    getModifiedPackages = pkgs: overlays: {
+        onlyPackages ? true,
+        onlyCompatible ? true,
+        recurseForDerivations ? true,
+    }: let
         getNames = overlay: builtins.attrNames (overlay pkgs pkgs);
         names = if overlays?default then getNames overlays.default else builtins.concatLists (map getNames (builtins.attrValues overlays));
-    in mapMergeUnique (name: if pkgs.${name}?recurseForDerivations || lib.isDerivation pkgs.${name} then { ${name} = pkgs.${name}; } else { }) names;
+        isCompatible = lib.meta.availableOn pkgs.stdenv.hostPlatform;
+    in mapMergeUnique (name: if !onlyPackages || (
+        (recurseForDerivations && (pkgs.${name}.recurseForDerivations or false)) || ((lib.isDerivation pkgs.${name}) && (!onlyCompatible || (isCompatible pkgs.${name})))
+    ) then { ${name} = pkgs.${name}; } else { }) names;
 
     # Automatically builds a flake's »outputs.packages« based on its »(inputs.self == outputs).overlays.default/.*« (and »inputs.nixpkgs«).
-    packagesFromOverlay = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, extra ? pkgs: { }, exclude ? [ ], apply ? pkgs: packages: packages, ... }: let
+    packagesFromOverlay = args@{
+        inputs,
+        systems ? if inputs?systems then import inputs.systems else defaultSystems, # list of strings or attrset of args to »import <nixpkgs>«
+        default ? null, # name or pkgs -> package
+        extra ? pkgs: { }, # list of names or pkgs -> packages
+        exclude ? [ ], # list of names
+        apply ? pkgs: packages: packages,
+        onlyPackages ? true, onlyCompatible ? true, recurseForDerivations ? true,
+    ... }: let
         systems' = if lib.isAttrs systems then systems else lib.genAttrs systems  (localSystem: { inherit localSystem; });
     in lib.flip lib.mapAttrs systems' (localSystem: systemArgs: let
         pkgs = importPkgs inputs ((onlyExtraArgs packagesFromOverlay args) // systemArgs);
-        modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; });
-        compatiblePackages = lib.filterAttrs (_: pkg: !(builtins.isList (pkg.meta.platforms or null)) || (builtins.elem localSystem pkg.meta.platforms)) modifiedPackages;
-        withExtras = (builtins.removeAttrs compatiblePackages exclude)
+        modifiedPackages = getModifiedPackages pkgs (inputs.self.overlays or { default = inputs.self.overlay; }) { inherit onlyPackages onlyCompatible recurseForDerivations; };
+        withExtras = (builtins.removeAttrs modifiedPackages exclude)
         // (if lib.isList extra then builtins.listToAttrs (map (name: { inherit name; value = pkgs.${name}; }) extra) else extra pkgs)
         // (if default != null then { default = if builtins.isString default then pkgs.${default} else default pkgs; } else { });
     in apply pkgs withExtras);
 
     # Automatically instantiates »input.nixpkgs« for all »systems« (see »importPkgs inputs args«), and returns a subset of it (as listed in or returned by »what«, plus »default«) for exporting as »programs« or (wrapped) as »apps« flake output.
-    exportFromPkgs = args@{ inputs, systems ? if inputs?systems then import inputs.systems else defaultSystems, default ? null, what ? [ ], asApps ? false, ... }: let
+    exportFromPkgs = args@{
+        inputs,
+        systems ? if inputs?systems then import inputs.systems else defaultSystems, # list of strings or attrset of args to »import <nixpkgs>«
+        default ? null, # name or pkgs -> package
+        what ? [ ], # list of names or pkgs -> attrset
+        asApps ? false, # bool
+    ... }: let
         systems' = if lib.isAttrs systems then systems else lib.genAttrs systems  (localSystem: { inherit localSystem; });
     in lib.flip lib.mapAttrs systems' (localSystem: systemArgs: let
         pkgs = importPkgs inputs ((onlyExtraArgs exportFromPkgs args) // systemArgs);

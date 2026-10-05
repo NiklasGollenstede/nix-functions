@@ -162,14 +162,58 @@ in rec {
 
     ### Functions
 
-    # Builds functions whose arguments can be overridden, similar to »lib.makeOverridable«, but instead of setting the override function as »override« on the attributes that the original function returns (and concerning itself with »overrideDerivation« and »overrideAttrs«), the override function is passed as second argument to the original function (who can then return or use it in whatever way it chooses).
-    # Example: func = withOverridable (args: override: { inherit args override; }); foo = func "foo"; bar = foo.override "bar"; assert foo.args == "foo" && bar.args == "bar";
-    withOverridable = f_args_override: let
+  /**
+    Builds functions whose arguments can be overridden, similar to
+    `makeOverridable`, but instead of setting the override function as
+    `override` on the attributes that the original function returns
+    (and concerning itself with `overrideDerivation` and `overrideAttrs`),
+    the override function is passed as second argument to the original
+    function (who can then return or use it in whatever way it chooses).
+
+    # Inputs
+
+    `f_args_override`
+
+    : 1\. Function argument
+
+    # Type
+
+    ```
+    withOverride :: (AttrSet -> (AttrSet -> a) -> a) -> AttrSet -> a
+    ```
+    I.e., the only argument to this function is a function that takes some
+    argument plus override function while returning something that includes
+    the override function, and this function returns a function that takes the
+    same argument and returns the same thing (as far as types are concerned).
+
+    # Examples
+    :::{.example}
+    ## `lib.customisation.withOverride` usage example
+
+    ```nix
+    add_a_b = withOverride ({ a, b, }: override: {
+      result = a + b;
+      set_a = a: override { inherit a; };
+    });
+    five = add_a_b { a = 2; b = 3; };
+    more = five.set_a 10;
+    assert fife.result == 5 && more.result == 13;
+    ```
+    :::
+  */
+  withOverride =
+    f_args_override:
+    let
       keepSignature = lib.mirrorFunctionArgs f_args_override;
-    in keepSignature (origArgs: let
+    in
+    keepSignature (
+      origArgs:
+      let
         addArgs = newArgs: origArgs // (if lib.isFunction newArgs then newArgs origArgs else newArgs);
-        override = keepSignature (newArgs: withOverridable f_args_override (addArgs newArgs));
-    in f_args_override origArgs override);
+        override = keepSignature (newArgs: withOverride f_args_override (addArgs newArgs));
+      in
+      f_args_override origArgs override
+    );
 
     ## Extract the subset of »args« passed to a »function« that it did not declare explicitly, for example to pass them through to some other function:
     #  myFunc = { a, b, ... }@args: otherFunc (onlyExtraArgs myFunc args) // { c = a + b; };
