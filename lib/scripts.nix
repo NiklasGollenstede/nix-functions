@@ -1,6 +1,6 @@
 dirname: inputs: let
     inherit (inputs.nixpkgs.sourceInfo.unpatched or inputs.nixpkgs) lib;
-    inherit (import "${dirname}/vars.nix" dirname inputs) extractLineAnchored;
+    inherit (import "${dirname}/vars.nix" dirname inputs) extractLineAnchored withOverride;
     inherit (import "${dirname}/misc.nix" dirname inputs) ifNull;
 in rec {
 
@@ -178,25 +178,57 @@ in rec {
 
 
     # `nix print-dev-env $drv`, as a normal derivation producing a sourceable script, instead of a function baked into nix.
-    # Compared to `nix print-dev-env $drv`, this does not:
-    # * rewrite the output paths to point to ./outputs/* (instead of /nix/store/*)
-    # * save the structured-attrs files NIX_ATTRS_SH_FILE and NIX_ATTRS_JSON_FILE
-    print-dev-env = pkg: let
+    # For derivations with structured attrs, the generated script (re-)creates the files NIX_ATTRS_SH_FILE and NIX_ATTRS_JSON_FILE when sourced, in NIX_BUILD_TOP (or a new temporary directory, if »!newTmp«). Unlike `nix print-dev-env` (which writes them to a directory that it deletes before the script can be sourced), their contents get their output paths rewritten as well.
+    print-dev-env = withOverride ({
+        drv, # The derivation to generate the env script for.
+        newTmp ? true, # Whether to point NIX_BUILD_TOP and TMP/TMPDIR/TEMP/TEMPDIR to a new temporary directory (as `nix develop`/`nix print-dev-env` does), or leave them untouched.
+        outputsDir ? "outputs", # The directory prefix to which output paths are rewritten (»/nix/store/...« -> »$PWD/<outputsDir>/<outputName>«, everywhere in the generated script), or »null« to leave them untouched. The path is prefixed with »$PWD« if not absolute and, as with `nix print-dev-env`, used as verbatim replacement (so you probably don't want special characters or spaces in it (or PWD)).
+        prePrint ? "", postPrint ? "", # Optional shell code to run in the builder before and after printing the generated environment script to stdout.
+    }: override: let
+        marker = name: "__NIX_${name}_\${__nix_dev_env_main##*/}__"; # (bash) heredoc end markers, unique to (and deterministic for) the derivation
         # these were taken from: <nix>/src/nix/develop.cc
         ignoreVars = [ "BASHOPTS" "HOME" "NIX_BUILD_TOP" "NIX_ENFORCE_PURITY" "NIX_LOG_FD" "NIX_REMOTE" "PPID" "SHELLOPTS" "SSL_CERT_FILE" "TEMP" "TEMPDIR" "TERM" "TMP" "TMPDIR" "TZ" "UID" ];
         savedVars = [ "PATH" "XDG_DATA_DIRS" ];
-    in pkg.overrideAttrs (old: {
-        builder = pkg.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
-        #outputs = [ "out" ]; # we are only writing to this one, so the others may not be declared as far as Nix is concerned
-        # Setting `outputs` via `overrideAttrs` does not affect the actual derivation, and `overrideDerivation` is not transparent (the result lacks `.overrideAttrs`). So instead just `touch` all outputs. Except that `outputs` is not the whole truth, as `separateDebugInfo` adds a `debug` output. `drvAttrs.outputs` is probably what we want. But chat is not in the `old` attr set. So we use `pkg.drvAttrs.outputs`, but that certainly does not update when overwritten. What. A. Mess.
-        args = [ "-c" '' # bash
-            ${lib.concatMapStringsSep "\n" (output: ": >>${"$"}${output} || exit") (pkg.drvAttrs.outputs)}
-            exec >>$out # redirect stdout
-            if [[ -e "$NIX_ATTRS_SH_FILE" ]]; then source "$NIX_ATTRS_SH_FILE"; fi
-            export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
-            #outputs='${lib.concatStringsSep " " (old.outputs or [ "out" ])}'
-            if [[ -n $stdenv ]]; then source "$stdenv"/setup ; fi
+        randomSeedPath = if drv ? out then builtins.unsafeDiscardStringContext drv.out.outPath else "";
+    in lib.flip builtins.removeAttrs [
+        "overrideAttrs" "overrideDerivation" # to override derivation properties, use »env.override (old: { drv = old.drv.overrideAttrs ...; })«
+    ] ((drv.overrideAttrs (finalAttrs: prevAttrs: {
+        name = "${drv.name}-env"; # (like `nix develop`) to distinguish the store paths from the actual package, Original name is restored below.
+        builder = drv.stdenv.shell; # This should already be the case for any standard derivation (nix develop throws before building if not), and using "args" to replace the build command is the least invasive way to pass them, as "args" are not in the environment.
+        # The outputs have to stay as they are (for their variables in the env and for »builtins.placeholder« to work). Since the declared `outputs` are not the whole truth (e.g., `separateDebugInfo` adds `debug`) and may be changed by later overrides, the builder takes them from its environment and `touch`es all of them.
 
+        # Remove output checks (like `nix develop` does), as the generated script references everything. `overrideAttrs` can't remove attributes, so set them to values that disable the checks (`mkDerivation` maps `null`s in `allowed*` through, which then get ignored).
+        ${if prevAttrs ? allowedReferences then "allowedReferences" else null} = null;
+        ${if prevAttrs ? allowedRequisites then "allowedRequisites" else null} = null;
+        ${if prevAttrs ? disallowedReferences then "disallowedReferences" else null} = [ ];
+        ${if prevAttrs ? disallowedRequisites then "disallowedRequisites" else null} = [ ];
+        ${if prevAttrs ? outputChecks then "outputChecks" else null} = { };
+        args = [ "-c" '' # bash
+            if [[ -e "$NIX_ATTRS_SH_FILE" ]]; then source "$NIX_ATTRS_SH_FILE"; fi
+            # map of all output names to their paths (variables prefixed with »__nix_dev_env_« are excluded from the generated script)
+            declare -A __nix_dev_env_outputs=( )
+            if [[ -e "$NIX_ATTRS_SH_FILE" ]] ; then
+                for __nix_dev_env_o in "''${!outputs[@]}" ; do __nix_dev_env_outputs[$__nix_dev_env_o]=''${outputs[$__nix_dev_env_o]} ; done
+            else
+                for __nix_dev_env_o in $outputs ; do __nix_dev_env_outputs[$__nix_dev_env_o]=''${!__nix_dev_env_o} ; done
+            fi
+            for __nix_dev_env_o in "''${__nix_dev_env_outputs[@]}" ; do : >>"$__nix_dev_env_o" || exit ; done
+            __nix_dev_env_main=''${__nix_dev_env_outputs[${builtins.head (finalAttrs.outputs or [ "out" ])}]:-} # first/default output
+            unset __nix_dev_env_o
+            exec {__nix_dev_env_stdout}>&1 >>"$__nix_dev_env_main" || exit # redirect stdout, but save the original
+            ${lib.optionalString (outputsDir != null) ''
+                # read the rest of the script into a variable (see the end of the script)
+                echo "IFS= read -r -d \"\" __nix_print_dev_env <<'${marker "PRINT_DEV_ENV"}' || :"
+            ''}
+            export IN_NIX_SHELL=impure ; export dontAddDisableDepTrack=1
+            if [[ -n $stdenv ]]; then
+                export NIX_OUTPATH_USED_AS_RANDOM_SEED=${lib.escapeShellArg randomSeedPath} # use the same »-frandom-seed« as the real build
+                set -e ; source "$stdenv"/setup >&$__nix_dev_env_stdout ; set +e
+                unset NIX_OUTPATH_USED_AS_RANDOM_SEED
+            fi
+            name=${lib.escapeShellArg drv.name} # restore the original name
+
+            ${prePrint}
             echo 'unset shellHook'
             ${lib.concatStrings (map (var: ''
                 echo '${var}=''${${var}:-} ; nix_saved_${var}="''$${var}"'
@@ -208,8 +240,9 @@ in rec {
                 if [[ ' -x -- -a -A ' != *' '$type' '* ]] ; then continue; fi
                 if [[ $name =~ ^BASH_ || $name =~ ^COMP_ || ' _ DIRSTACK EUID FUNCNAME HISTCMD HOSTNAME GROUPS PIPESTATUS PWD RANDOM SHLVL SECONDS EPOCHREALTIME EPOCHSECONDS ' == *' '$name' '* ]] ; then continue; fi
                 # end from <nix>/src/nix/get-env.sh
-                if [[ ' ${lib.concatStringsSep " " ignoreVars} BASH HOSTTYPE IFS LINENO MACHTYPE OLDPWD OPTERR OSTYPE PS4 SHELL ' == *' '$name' '* ]] ; then continue; fi
-                printf '%s\n' "$line"
+                if [[ $name == __nix_dev_env_* || ' ${lib.concatStringsSep " " ignoreVars} BASH HOSTTYPE IFS LINENO MACHTYPE OLDPWD OPTERR OSTYPE PS4 SHELL ' == *' '$name' '* ]] ; then continue; fi
+                if [[ ( $type == -a || $type == -A ) && $line != *=* ]] ; then line+='=()' ; fi # declared-only arrays as empty arrays (like `nix print-dev-env`)
+                printf 'declare -g %s\n' "''${line#declare }" # global, even if the script is sourced from within a function
             done
             declare -F | while IFS="" read -r line ; do
                 if ! [[ $line =~ ^declare\ -f\ ([^ ]+) ]] ; then continue ; fi
@@ -218,13 +251,45 @@ in rec {
             ${lib.concatStrings (map (var: ''
                 echo '${var}="''$${var}''${nix_saved_${var}:+:$nix_saved_${var}}"'
             '') savedVars)}
-            echo 'export NIX_BUILD_TOP="$( mktemp -d -t nix-shell.XXXXXX )"'
-            ${lib.concatStrings (map (var: ''
-                echo 'export ${var}="$NIX_BUILD_TOP"'
-            '') [ "TMP" "TMPDIR" "TEMP" "TEMPDIR" ])}
+            ${lib.optionalString newTmp ''
+                echo 'export NIX_BUILD_TOP="$( mktemp -d -t nix-shell.XXXXXX )"'
+                ${lib.concatStrings (map (var: ''
+                    echo 'export ${var}="$NIX_BUILD_TOP"'
+                '') [ "TMP" "TMPDIR" "TEMP" "TEMPDIR" ])}
+            ''}
+            if [[ -e "$NIX_ATTRS_SH_FILE" ]] ; then
+                # embed the structured-attrs files, to be written (and pointed to) when sourced
+                echo '${if newTmp then ''export NIX_ATTRS_SH_FILE="$NIX_BUILD_TOP/.attrs.sh"'' else ''export NIX_ATTRS_SH_FILE="$( mktemp -d -t nix-attrs.XXXXXX )/.attrs.sh"''}'
+                echo 'export NIX_ATTRS_JSON_FILE="''${NIX_ATTRS_SH_FILE%/*}/.attrs.json"'
+                ${lib.concatMapStrings (ext: let
+                    nameInAttrs = { SH = name: "declare name='${name}'"; JSON = name: ''"name":"${name}"''; };
+                in ''
+                    echo "IFS= read -r -d \"\" __nix_dev_env_attrs <<'${marker "ATTRS_${ext}"}' || :"
+                    __nix_dev_env_attrs=$(<"$NIX_ATTRS_${ext}_FILE")
+                    __nix_dev_env_from=${lib.escapeShellArg (nameInAttrs.${ext} "${drv.name}-env")} ; __nix_dev_env_to=${lib.escapeShellArg (nameInAttrs.${ext} drv.name)}
+                    __nix_dev_env_attrs=''${__nix_dev_env_attrs/"$__nix_dev_env_from"/"$__nix_dev_env_to"} # (restore the original name)
+                    printf '%s\n' "$__nix_dev_env_attrs"
+                    echo "${marker "ATTRS_${ext}"}"
+                    echo 'printf %s "$__nix_dev_env_attrs" >"$NIX_ATTRS_${ext}_FILE" ; unset __nix_dev_env_attrs'
+                '') [ "SH" "JSON" ]}
+            fi
             echo 'eval "''${shellHook:-}"'
+            ${postPrint}
+
+            ${lib.optionalString (outputsDir != null) ''
+                # end the heredoc, rewrite all occurrences of output paths in it to »outputsDir« (like <nix>/src/nix/develop.cc's »makeRcScript« does), and eval it (with the helper var already unset)
+                echo "${marker "PRINT_DEV_ENV"}"
+                for __nix_dev_env_o in "''${!__nix_dev_env_outputs[@]}" ; do
+                    printf '__nix_print_dev_env=''${__nix_print_dev_env//"%s"/%s/%s}\n' "''${__nix_dev_env_outputs[$__nix_dev_env_o]}" ${lib.escapeShellArg (
+                        (if lib.hasPrefix "/" outputsDir then "" else ''"$PWD"/'') + lib.escapeShellArg outputsDir
+                    )} "$__nix_dev_env_o"
+                done
+                echo 'eval "unset __nix_print_dev_env ; $__nix_print_dev_env"'
+            ''}
+            # restore stdout, so that anything appended to the builder command (or exit hooks) doesn't write to the generated script
+            exec >&$__nix_dev_env_stdout {__nix_dev_env_stdout}>&-
         '' ];
-    });
+    })) // { inherit override; }));
 
 
     # Wraps a (bash) script into a "package", making »deps« available on the script's path.
