@@ -143,18 +143,21 @@ in rec {
         except = [ "default" ]; default = dir: importPkgsDefs inputs dir opts;
     } // opts // { filter = lib.isFunction; });
 
-    importScripts = inputs: dir: opts: ( # (recurse implicitly)
+    importScripts = inputs: dir: opts@{
+        except ? [ ], common ? [ ],
+    ... }: ( # (recurse implicitly)
         builtins.mapAttrs (name: _: importScripts inputs "${dir}/${name}" opts) (lib.filterAttrs (__: _:_ == "directory") (builtins.removeAttrs (builtins.readDir dir) (opts.except or [ ])))
     ) // ( # (recurse explicitly)
         builtins.mapAttrs (name: path: import path "${dir}/${name}" inputs) (builtins.removeAttrs (getNixDirs dir) (opts.except or [ ]))
         # (actual import:)
-    ) // (lib.mapAttrs (name: path': ({
+    ) // (lib.mapAttrs (name: path: ({
         __functor = _: { # (this will be called by callPackage and is thus the target of .override)
             writeShellScriptBin, pkgs, lib, helpers ? { },
             context ? { }, preScript ? "", postScript ? "",
         }: let
-            path = builtins.path { path = path'; }; # (don't rebuild the script on every change to the repo)
-            scripts = substituteImplicit { inherit helpers pkgs; scripts = [ path ]; context = {
+            path' = builtins.path { path = path; }; # (don't rebuild the script on every change to the repo)
+            common' = map (path: if lib.isString path && (builtins.substring 0 1 path != "/") then builtins.path { path = "${dir}/${path}"; } else path) common;
+            scripts = substituteImplicit { inherit helpers pkgs; scripts = common' ++ [ path' ]; context = {
                 dirname = dir; inherit inputs pkgs lib; outputs = inputs.self;
             } // (opts.context or { }) // context; };
         in (
@@ -163,10 +166,10 @@ in rec {
                 source ${bash.generic-arg-verify}
                 source ${bash.generic-arg-help}
                 ${preScript}${"\n"}${scripts}${"\n"}${postScript}
-            '').overrideAttrs (old: { passthru = { inherit scripts; src = path; }; })
+            '').overrideAttrs (old: { passthru = { inherit scripts; src = path'; common = common'; }; })
         );
-        inherit name; script = path';
-    })) (getFilesExt "sh(.md)?" dir));
+        inherit name; script = path;
+    })) (builtins.removeAttrs (getFilesExt "sh(.md)?" dir) (opts.exclude or [ ])));
 
     # Imports »inputs.nixpkgs« and instantiates it with all default ».overlay(s)« provided by »inputs.*«.
     importPkgs = inputs: args: import inputs.nixpkgs ({
@@ -326,5 +329,30 @@ in rec {
         in finalize l3),
 
     }: if downgrade then new else if params?base && lib.versionOlder version base.version then base else new;
+
+    ## Creates an overlay that **modifies existing** (but does not add new) VS Code extensions in `pkgs.vscode-extensions` and (if its overlay is applied before this one) in all sets from `github:nix-community/nix-vscode-extensions`.
+    #  `overrides` is a (function to a) two-level attrset `{ ${publisher}.${name} = ...; }`.
+    #  Each leaf is either a function that receives the existing extension package and returns its replacement, or directly the replacement package.
+    #  Overrides for extensions that don't exist (in the set prior to overriding) in a set are ignored (for that set).
+    #  Example:
+    #    nixpkgs.overlays = lib.mkAfter [ (lib.blinders.mkVSCodeExtensionsOverlay { foo.bar = ext: ext.overrideAttrs (old: { ... }); }) ];
+    mkVSCodeExtensionsOverlay = overrides: let
+        patchSet = oldSets: let
+            overrides' = if lib.isFunction overrides then overrides oldSets else overrides;
+        in lib.mapAttrs (publisherName: oldExts: let
+            newExts = overrides'.${publisherName} or { };
+        in if newExts != { } && (lib.isAttrs oldExts) && !(lib.isDerivation oldExts) then lib.mapAttrs (extName: oldExt: if newExts?${extName} then (
+            let newExt = newExts.${extName}; in if lib.isFunction newExt then newExt oldExt else newExt
+        ) else oldExt) oldExts else oldExts) oldSets;
+        patchSets = attrs: lib.mapAttrs (name: value: (
+            if lib.isFunction value then (arg: patchSets (value arg)) # .forVSCodeVersion, .usingFixesFrom
+            else if lib.isAttrs value && !(lib.isDerivation value) then patchSet value
+            else value
+        )) attrs;
+    in final: prev: (lib.optionalAttrs (prev?nix-vscode-extensions) (let
+        patched = patchSets prev.nix-vscode-extensions;
+    in patched // { nix-vscode-extensions = patched; })) // {
+        vscode-extensions = patchSet prev.vscode-extensions;
+    };
 
 }
